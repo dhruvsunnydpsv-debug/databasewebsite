@@ -159,7 +159,6 @@ export default function TestSessionPage() {
     const [timerSec, setTimerSec] = useState(STAGE_CONFIG[1].seconds);
     const [timerHidden, setTimerHidden] = useState(false);
     const [desmosOpen, setDesmosOpen] = useState(false);
-    const [desmosPos, setDesmosPos] = useState({ x: 120, y: 80 });
     const [module1Score, setModule1Score] = useState<number>(0);
     const [totalScore, setTotalScore] = useState(0);
     const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -530,8 +529,6 @@ export default function TestSessionPage() {
             {/* ══════════ DRAGGABLE DESMOS ══════════ */}
             {desmosOpen && isMathStage && (
                 <DesmosCalculator
-                    position={desmosPos}
-                    onMove={setDesmosPos}
                     onClose={() => setDesmosOpen(false)}
                 />
             )}

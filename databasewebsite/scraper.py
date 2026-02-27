@@ -1,5 +1,5 @@
 """
-harvester.py — SAT Automated Harvester v3 (Groq-powered)
+scraper.py — SAT Automated Scraper v3 (Groq-powered)
 =========================================================
 Runs every 15 min via GitHub Actions.
 Uses Groq's free API (Llama 3.3-70b) — 14,400 req/day free, no credit card.
@@ -217,7 +217,7 @@ def validate(data: dict, exp_module: str, exp_domain: str, exp_diff: str, exp_sp
 # MAIN
 # ─────────────────────────────────────────────────────────────
 def main():
-    log.info("=== SAT Harvester v3 (Groq) starting ===")
+    log.info("=== SAT Scraper v3 (Groq) starting ===")
 
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
     groq_client = Groq(api_key=GROQ_API_KEY)

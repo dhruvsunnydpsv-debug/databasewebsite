@@ -1,4 +1,4 @@
-name: SAT Harvester — Auto Ingest
+name: SAT Scraper — Auto Ingest
 
 on:
   schedule:
@@ -32,7 +32,7 @@ jobs:
           pip install --upgrade pip
           pip install supabase groq
 
-      - name: Run SAT Harvester
+      - name: Run SAT Scraper
         env:
           NEXT_PUBLIC_SUPABASE_URL:      ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY:     ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -40,8 +40,8 @@ jobs:
           GROQ_API_KEY:                  ${{ secrets.GROQ_API_KEY }}
         run: |
           cd databasewebsite
-          python harvester.py
+          python scraper.py
 
       - name: Print job summary
         if: always()
-        run: echo "### ✅ Harvester run complete at $(date -u)" >> $GITHUB_STEP_SUMMARY
+        run: echo "### ✅ Scraper run complete at $(date -u)" >> $GITHUB_STEP_SUMMARY
