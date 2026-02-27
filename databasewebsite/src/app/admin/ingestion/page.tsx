@@ -181,6 +181,6 @@ export default function IngestionPage() {
             </div>
         )
     }
-    </div >
-  );
+        </div >
+    );
 }
