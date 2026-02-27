@@ -15,6 +15,7 @@ interface Question {
     domain?: string;
     difficulty?: string;
     module?: string;
+    is_placeholder?: boolean;  // true when bank is empty for this bucket
 }
 
 type Stage = 1 | 2 | 3 | 4;
@@ -27,6 +28,20 @@ const STAGE_CONFIG = {
     4: { label: "Math — Module 2", count: 22, seconds: 35 * 60, subject: "math" },
 } as const;
 
+// ─── Placeholder generator (used when DB bucket is empty) ───
+function makePlaceholder(moduleFilter: string, difficulty: string, domain: string, index: number): Question {
+    return {
+        id: `placeholder-${moduleFilter}-${domain}-${difficulty}-${index}`,
+        question_text: `[Question Bank Building] This slot is reserved for a ${difficulty} question in the "${domain.replace(/_/g, ' ')}" domain (${moduleFilter.replace('_', ' ')}).\n\nOur automated harvester is currently generating questions for this topic. This placeholder will be replaced automatically within the next 15 minutes.`,
+        options: ["Continue", "Mark for Review", "Skip", "Next Question"],
+        correct_answer: "Continue",
+        domain,
+        difficulty,
+        module: moduleFilter,
+        is_placeholder: true,
+    };
+}
+
 // ─── Supabase Adaptive Fetch ───────────────────────────────────
 async function fetchQuestions(stage: Stage, module1Score?: number): Promise<Question[]> {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -37,17 +52,20 @@ async function fetchQuestions(stage: Stage, module1Score?: number): Promise<Ques
     const moduleFilter = isMath ? "Math" : "Reading_Writing";
     const total = cfg.count;
 
+    // Domain distribution for this module
+    const mathDomains = ["Heart_of_Algebra", "Advanced_Math", "Problem_Solving_Data", "Geometry_Trigonometry"];
+    const rwDomains = ["Information_and_Ideas", "Craft_and_Structure", "Expression_of_Ideas", "Standard_English_Conventions"];
+    const domains = isMath ? mathDomains : rwDomains;
+
     // Difficulty distribution
     let tiers: { difficulty: string; count: number }[];
     if (stage === 1 || stage === 3) {
-        // Balanced for Module 1
         tiers = [
             { difficulty: "Easy", count: Math.round(total * 0.30) },
             { difficulty: "Medium", count: Math.round(total * 0.40) },
             { difficulty: "Hard", count: total - Math.round(total * 0.30) - Math.round(total * 0.40) },
         ];
     } else {
-        // Adaptive for Module 2
         const upperRouting = (module1Score ?? 0) > 65;
         if (upperRouting) {
             tiers = [
@@ -65,18 +83,56 @@ async function fetchQuestions(stage: Stage, module1Score?: number): Promise<Ques
     }
 
     const results: Question[] = [];
+    let placeholderIdx = 0;
+
     for (const tier of tiers) {
         if (tier.count <= 0) continue;
-        const url = `${supabaseUrl}/rest/v1/sat_question_bank?module=eq.${moduleFilter}&difficulty=eq.${tier.difficulty}&limit=${tier.count}&order=random()`;
-        const res = await fetch(url, {
-            headers: { "apikey": supabaseKey, "Authorization": `Bearer ${supabaseKey}` }
-        });
-        if (res.ok) {
-            const rows = await res.json();
-            results.push(...rows);
+
+        // Spread questions across domains for this difficulty tier
+        const perDomain = Math.ceil(tier.count / domains.length);
+        let tierRemaining = tier.count;
+
+        for (const domain of domains) {
+            if (tierRemaining <= 0) break;
+            const fetchCount = Math.min(perDomain, tierRemaining);
+
+            try {
+                const url = `${supabaseUrl}/rest/v1/sat_question_bank?module=eq.${moduleFilter}&domain=eq.${domain}&difficulty=eq.${tier.difficulty}&limit=${fetchCount}&order=random()`;
+                const res = await fetch(url, {
+                    headers: { "apikey": supabaseKey, "Authorization": `Bearer ${supabaseKey}` }
+                });
+                if (res.ok) {
+                    const rows: Question[] = await res.json();
+                    if (rows.length > 0) {
+                        results.push(...rows.slice(0, fetchCount));
+                        tierRemaining -= rows.length;
+                    } else {
+                        // No questions yet — generate placeholders so test always loads
+                        for (let p = 0; p < fetchCount; p++) {
+                            results.push(makePlaceholder(moduleFilter, tier.difficulty, domain, placeholderIdx++));
+                        }
+                        tierRemaining -= fetchCount;
+                    }
+                } else {
+                    for (let p = 0; p < fetchCount; p++) {
+                        results.push(makePlaceholder(moduleFilter, tier.difficulty, domain, placeholderIdx++));
+                    }
+                    tierRemaining -= fetchCount;
+                }
+            } catch {
+                for (let p = 0; p < fetchCount; p++) {
+                    results.push(makePlaceholder(moduleFilter, tier.difficulty, domain, placeholderIdx++));
+                }
+                tierRemaining -= fetchCount;
+            }
         }
     }
-    return results;
+
+    // Final safety net: always return exactly `total` questions
+    while (results.length < total) {
+        results.push(makePlaceholder(moduleFilter, "Medium", "General", placeholderIdx++));
+    }
+    return results.slice(0, total);
 }
 
 // ─── Timer Display ────────────────────────────────────────────
@@ -355,7 +411,26 @@ export default function TestSessionPage() {
                             )}
                         </>
                     ) : (
-                        <p style={{ color: "#94a3b8", fontStyle: "italic" }}>No questions loaded.</p>
+                        // ── Placeholder card ─────────────────────
+                        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", textAlign: "center", padding: "2rem" }}>
+                            <div style={{ fontSize: "2.5rem", marginBottom: "1.25rem" }}>⏳</div>
+                            <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem", flexWrap: "wrap", justifyContent: "center" }}>
+                                <span style={{ backgroundColor: "#eff6ff", color: "#1d4ed8", border: "1px solid #bfdbfe", borderRadius: "9999px", padding: "0.2rem 0.75rem", fontSize: "0.72rem", fontWeight: 700 }}>
+                                    {q.module?.replace("_", " ")}
+                                </span>
+                                <span style={{ backgroundColor: q.difficulty === "Hard" ? "#fef2f2" : q.difficulty === "Easy" ? "#f0fdf4" : "#fffbeb", color: q.difficulty === "Hard" ? "#dc2626" : q.difficulty === "Easy" ? "#16a34a" : "#d97706", border: `1px solid ${q.difficulty === "Hard" ? "#fecaca" : q.difficulty === "Easy" ? "#bbf7d0" : "#fde68a"}`, borderRadius: "9999px", padding: "0.2rem 0.75rem", fontSize: "0.72rem", fontWeight: 700 }}>
+                                    {q.difficulty}
+                                </span>
+                                <span style={{ backgroundColor: "#f8fafc", color: "#475569", border: "1px solid #e2e8f0", borderRadius: "9999px", padding: "0.2rem 0.75rem", fontSize: "0.72rem", fontWeight: 600 }}>
+                                    {q.domain?.replace(/_/g, " ")}
+                                </span>
+                            </div>
+                            <p style={{ fontSize: "1rem", fontWeight: 700, color: "#1e293b", marginBottom: "0.5rem" }}>Question Bank Building…</p>
+                            <p style={{ fontSize: "0.83rem", color: "#64748b", lineHeight: 1.6, maxWidth: "320px" }}>
+                                Our engine is generating <strong>{q.difficulty}</strong> questions for <strong>{q.domain?.replace(/_/g, " ")}</strong>. This slot will be filled automatically within the next 15 minutes.
+                            </p>
+                            <p style={{ marginTop: "1.5rem", fontSize: "0.75rem", color: "#94a3b8" }}>You can continue navigating — use Next → to proceed.</p>
+                        </div>
                     )}
                 </div>
             </div>
