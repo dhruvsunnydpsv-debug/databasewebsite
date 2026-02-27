@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from "react";
 import { UploadCloud, CheckCircle2, AlertCircle, Loader2, ShieldAlert } from "lucide-react";
+import Link from "next/link";
 
 export default function AdminIngestPage() {
     const [isDragging, setIsDragging] = useState(false);
@@ -56,12 +57,32 @@ export default function AdminIngestPage() {
             <div style={{
                 display: 'flex', alignItems: 'center', gap: '0.6rem',
                 backgroundColor: '#FFF0F0', border: '1px solid #C0392B',
-                borderRadius: '8px', padding: '0.6rem 1rem', marginBottom: '2rem',
+                borderRadius: '8px', padding: '0.6rem 1rem', marginBottom: '1.5rem',
             }}>
                 <ShieldAlert style={{ width: '1rem', height: '1rem', color: '#C0392B', flexShrink: 0 }} />
                 <p style={{ fontFamily: "'Inter', sans-serif", fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#C0392B', margin: 0 }}>
                     ADMIN PORTAL — INGESTION ENGINE — SECURE ZONE
                 </p>
+            </div>
+
+            {/* ── Navigation Toggle ───────────────────────────── */}
+            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '2rem' }}>
+                <Link href="/admin/ingest" style={{
+                    padding: '0.5rem 1.25rem', borderRadius: '9999px',
+                    border: '1px solid #0D0D0D', backgroundColor: '#0D0D0D',
+                    color: '#FBFBF2', fontSize: '0.8rem', fontWeight: 600,
+                    textDecoration: 'none',
+                }}>
+                    Ingestion Dropzone
+                </Link>
+                <Link href="/admin/audit" style={{
+                    padding: '0.5rem 1.25rem', borderRadius: '9999px',
+                    border: '1px solid #0D0D0D', backgroundColor: '#FAFAF2',
+                    color: '#0D0D0D', fontSize: '0.8rem', fontWeight: 600,
+                    textDecoration: 'none', transition: 'all 0.15s ease',
+                }}>
+                    Audit Logs
+                </Link>
             </div>
 
             {/* ── Page Header ─────────────────────────────────── */}

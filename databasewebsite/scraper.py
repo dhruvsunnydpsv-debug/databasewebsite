@@ -293,6 +293,96 @@ def main():
 
     print(f"RUN COMPLETE. Successfully injected {inserted} new questions into Supabase. Skipped {skipped} duplicates.")
 
+    # ── AUTO-REPAIR SWEEP ────────────────────────────────────
+    # After every harvest run, scan the entire DB for rows with
+    # broken domain tags or missing raw_original_text and fix them.
+    auto_repair_untagged(supabase, groq_client)
+
+
+# ─────────────────────────────────────────────────────────────
+# AUTO-REPAIR: Fix rows with invalid tags or missing raw text
+# ─────────────────────────────────────────────────────────────
+def auto_repair_untagged(supabase: Client, groq_client: Groq):
+    """
+    Automatically called at the end of every scraper run.
+    Finds questions whose domain is NOT in the strict Enum list
+    and re-classifies them via Groq.
+    """
+    print("--- AUTO-REPAIR SWEEP STARTING ---")
+
+    # Fetch ALL rows — we'll filter client-side for broken tags
+    try:
+        response = supabase.table("sat_question_bank") \
+            .select("id, module, domain, difficulty, question_text, raw_original_text") \
+            .limit(1000) \
+            .execute()
+        rows = response.data or []
+    except Exception as e:
+        log.error(f"Auto-repair: could not fetch rows: {e}")
+        return
+
+    broken = [r for r in rows if r.get("domain") not in VALID_DOMAINS or r.get("module") not in VALID_MODULES]
+
+    if not broken:
+        print("Auto-repair: All rows have valid tags. Nothing to fix.")
+        return
+
+    print(f"Auto-repair: Found {len(broken)} rows with invalid tags. Repairing…")
+
+    repaired = 0
+    failed = 0
+
+    for row in broken:
+        rid = row["id"]
+        qtext = row.get("question_text", "")
+
+        repair_prompt = f"""You are a strict database evaluation engine.
+Below is a SAT question. Categorize it using EXACTLY these Allowed Enums.
+DO NOT make up your own tags. Pick the single best match.
+
+ALLOWED MODULES: "Math", "Reading_Writing"
+ALLOWED DOMAINS:
+  For Math: "Heart_of_Algebra", "Advanced_Math", "Problem_Solving_Data", "Geometry_Trigonometry"
+  For Reading_Writing: "Information_Ideas", "Craft_Structure", "Expression_Ideas", "Standard_English"
+ALLOWED DIFFICULTIES: "Easy", "Medium", "Hard"
+
+QUESTION TEXT:
+{qtext}
+
+Respond in plain JSON only (no markdown):
+{{"module": "<module>", "domain": "<domain>", "difficulty": "<difficulty>"}}"""
+
+        try:
+            resp = groq_client.chat.completions.create(
+                model=MODEL,
+                messages=[{"role": "user", "content": repair_prompt}],
+                temperature=0.1,
+                response_format={"type": "json_object"}
+            )
+            tags = json.loads(resp.choices[0].message.content.strip())
+            m = tags.get("module")
+            d = tags.get("domain")
+            df = tags.get("difficulty")
+
+            if m in VALID_MODULES and d in VALID_DOMAINS and df in VALID_DIFFS:
+                update = {"module": m, "domain": d, "difficulty": df}
+                # Also backfill raw_original_text if it's missing
+                if not row.get("raw_original_text"):
+                    update["raw_original_text"] = f"[Auto-backfilled] Original question text before entity swap was not captured for this legacy row."
+                supabase.table("sat_question_bank").update(update).eq("id", rid).execute()
+                print(f"  ✓ Repaired ID {rid}: {m} | {d} | {df}")
+                repaired += 1
+            else:
+                log.warning(f"  ✗ Groq returned invalid tags for ID {rid}: {m} | {d} | {df}")
+                failed += 1
+        except Exception as e:
+            log.error(f"  ✗ Repair failed for ID {rid}: {e}")
+            failed += 1
+
+        time.sleep(1.5)  # Rate limit buffer
+
+    print(f"--- AUTO-REPAIR COMPLETE: Fixed {repaired}, Failed {failed} ---")
+
 
 if __name__ == "__main__":
     main()
