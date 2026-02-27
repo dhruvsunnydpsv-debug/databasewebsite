@@ -14,7 +14,7 @@ export default function AdminBackdoor() {
         if (code === '060911') {
             setModalOpen(false);
             setCode('');
-            router.push('/admin/ingestion');
+            router.push('/admin/ingest');
         } else {
             setError(true);
             setTimeout(() => setError(false), 1000);

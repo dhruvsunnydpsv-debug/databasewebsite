@@ -1,264 +1,232 @@
 "use client";
 
+import { useEffect, useRef } from 'react';
+
 export default function Home() {
+    const marqueeRef = useRef<HTMLDivElement>(null);
+
     return (
-        <div style={{ backgroundColor: '#FBFBF2', minHeight: 'calc(100vh - 3.5rem)', overflow: 'hidden' }}>
+        <div style={{ backgroundColor: '#FBFBF2', minHeight: 'calc(100vh - 3.5rem)', overflow: 'hidden', position: 'relative' }}>
 
-            {/* ── Hero Section ─────────────────────────────────────── */}
-            <section style={{ maxWidth: '1100px', margin: '0 auto', padding: '5rem 1.5rem 4rem' }}>
+            {/* ── Rotating Circle Badge (Top Left) ─────────────── */}
+            <div style={{
+                position: 'absolute',
+                top: '3rem',
+                left: '3rem',
+                width: '130px',
+                height: '130px',
+                zIndex: 5,
+                pointerEvents: 'none',
+            }}>
+                <svg viewBox="0 0 130 130" width="130" height="130">
+                    <defs>
+                        <path id="circle-path" d="M 65,65 m -50,0 a 50,50 0 1,1 100,0 a 50,50 0 1,1 -100,0" />
+                    </defs>
+                    <g style={{ animation: 'spin 22s linear infinite', transformOrigin: '65px 65px' }}>
+                        <text style={{ fontSize: '10.5px', fontFamily: "'Inter', sans-serif", fontWeight: 600, letterSpacing: '0.22em', fill: '#0D0D0D', textTransform: 'uppercase' }}>
+                            <textPath href="#circle-path">
+                                ELITE DIGITAL SAT PREP • FULL FORMAT TESTS •{' '}
+                            </textPath>
+                        </text>
+                        {/* Center dot */}
+                        <circle cx="65" cy="65" r="6" fill="#0D0D0D" />
+                    </g>
+                </svg>
+            </div>
 
-                {/* Floating Pill Badges */}
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '3rem', justifyContent: 'center' }}>
-                    {['Entity Swapping', 'Gemini Vision AI', 'College Board Compliant', 'Zero Copyright'].map(tag => (
-                        <span key={tag} style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            backgroundColor: '#E6D5F8',
-                            border: '1px solid #0D0D0D',
-                            borderRadius: '9999px',
-                            padding: '0.25rem 0.875rem',
-                            fontSize: '0.7rem',
-                            fontFamily: "'Inter', sans-serif",
-                            fontWeight: 500,
-                            letterSpacing: '0.06em',
-                            textTransform: 'uppercase' as const,
-                            color: '#0D0D0D',
-                        }}>
-                            {tag}
-                        </span>
-                    ))}
-                </div>
+            {/* ── Hero Section ──────────────────────────────────── */}
+            <section style={{ maxWidth: '900px', margin: '0 auto', padding: '7rem 1.5rem 5rem', textAlign: 'center' }}>
+
+                {/* Kicker */}
+                <p style={{
+                    fontFamily: "'Inter', sans-serif",
+                    fontSize: '0.7rem',
+                    fontWeight: 600,
+                    letterSpacing: '0.12em',
+                    textTransform: 'uppercase',
+                    color: '#888880',
+                    marginBottom: '1.5rem',
+                }}>
+                    The Gold Standard in Digital SAT Preparation
+                </p>
 
                 {/* Main Headline */}
-                <div style={{ textAlign: 'center', maxWidth: '780px', margin: '0 auto 2rem' }}>
-                    <h1 style={{
-                        fontFamily: "'Playfair Display', serif",
-                        fontSize: 'clamp(2.8rem, 7vw, 5.5rem)',
-                        fontWeight: 900,
-                        lineHeight: 1.05,
-                        letterSpacing: '-0.02em',
-                        color: '#0D0D0D',
-                        marginBottom: '1.5rem',
-                    }}>
-                        Don&apos;t copy,<br />
-                        <span style={{ fontStyle: 'italic', color: '#0D0D0D' }}>just synthesize.</span>
-                    </h1>
-                    <p style={{
-                        fontFamily: "'Inter', sans-serif",
-                        fontSize: '1.05rem',
-                        lineHeight: 1.7,
-                        color: '#555550',
-                        maxWidth: '560px',
-                        margin: '0 auto',
-                    }}>
-                        Upload a screenshot of any SAT question. Our engine swaps the{' '}
-                        <em>paint</em> while preserving the <em>engine</em> — producing a
-                        100% original, copyright-free variant with identical difficulty.
-                    </p>
-                </div>
+                <h1 style={{
+                    fontFamily: "'Playfair Display', serif",
+                    fontSize: 'clamp(3rem, 8vw, 6.5rem)',
+                    fontWeight: 900,
+                    lineHeight: 1.02,
+                    letterSpacing: '-0.025em',
+                    color: '#0D0D0D',
+                    marginBottom: '2rem',
+                }}>
+                    Stop guessing.<br />
+                    <span style={{ fontStyle: 'italic' }}>Just practice.</span>
+                </h1>
 
-                {/* CTA Buttons */}
-                <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', flexWrap: 'wrap', marginBottom: '5rem' }}>
+                {/* Sub-headline */}
+                <p style={{
+                    fontFamily: "'Inter', sans-serif",
+                    fontSize: '1.1rem',
+                    lineHeight: 1.75,
+                    color: '#555550',
+                    maxWidth: '580px',
+                    margin: '0 auto 2.5rem',
+                }}>
+                    Access a proprietary database of <strong style={{ color: '#0D0D0D' }}>10,000+</strong> hand-crafted Digital SAT questions. Perfectly calibrated to official College Board difficulty and format.
+                </p>
+
+                {/* CTAs */}
+                <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', flexWrap: 'wrap' }}>
                     <a
-                        href="/admin/ingestion"
+                        href="/test/session"
                         style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '0.5rem',
-                            backgroundColor: '#E6D5F8',
-                            color: '#0D0D0D',
-                            border: '1px solid #0D0D0D',
-                            borderRadius: '9999px',
-                            padding: '0.75rem 1.75rem',
-                            fontFamily: "'Inter', sans-serif",
-                            fontSize: '0.9rem',
-                            fontWeight: 600,
-                            textDecoration: 'none',
-                            transition: 'transform 0.15s ease, background-color 0.15s ease',
-                            cursor: 'pointer',
+                            display: 'inline-flex', alignItems: 'center', gap: '0.4rem',
+                            backgroundColor: '#E6D5F8', color: '#0D0D0D',
+                            border: '1px solid #0D0D0D', borderRadius: '9999px',
+                            padding: '0.8rem 2rem',
+                            fontFamily: "'Inter', sans-serif", fontSize: '0.9rem', fontWeight: 600,
+                            textDecoration: 'none', cursor: 'pointer',
+                            transition: 'background-color 0.15s ease, transform 0.1s ease',
                         }}
-                        onMouseEnter={e => {
-                            e.currentTarget.style.backgroundColor = '#D4BFEF';
-                            e.currentTarget.style.transform = 'translateY(-2px)';
-                        }}
-                        onMouseLeave={e => {
-                            e.currentTarget.style.backgroundColor = '#E6D5F8';
-                            e.currentTarget.style.transform = 'translateY(0)';
-                        }}
+                        onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#D4BFEF'; e.currentTarget.style.transform = 'translateY(-2px)'; }}
+                        onMouseLeave={e => { e.currentTarget.style.backgroundColor = '#E6D5F8'; e.currentTarget.style.transform = 'translateY(0)'; }}
                     >
-                        Open Ingestion Engine →
+                        View Question Bank →
                     </a>
                     <a
-                        href="#how-it-works"
+                        href="#domains"
                         style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '0.5rem',
-                            backgroundColor: 'transparent',
-                            color: '#0D0D0D',
-                            border: '1px solid #0D0D0D',
-                            borderRadius: '9999px',
-                            padding: '0.75rem 1.75rem',
-                            fontFamily: "'Inter', sans-serif",
-                            fontSize: '0.9rem',
-                            fontWeight: 500,
+                            display: 'inline-flex', alignItems: 'center',
+                            backgroundColor: 'transparent', color: '#0D0D0D',
+                            border: '1px solid #0D0D0D', borderRadius: '9999px',
+                            padding: '0.8rem 2rem',
+                            fontFamily: "'Inter', sans-serif", fontSize: '0.9rem', fontWeight: 500,
                             textDecoration: 'none',
                             transition: 'background-color 0.15s ease',
                         }}
                         onMouseEnter={e => e.currentTarget.style.backgroundColor = 'rgba(13,13,13,0.05)'}
                         onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
                     >
-                        How it works
+                        Explore Domains
                     </a>
                 </div>
+            </section>
 
-                {/* Decorative Visual Strip */}
-                <div style={{
-                    display: 'flex',
-                    alignItems: 'stretch',
-                    gap: '1rem',
-                    justifyContent: 'center',
-                    flexWrap: 'wrap',
-                }}>
+            {/* ── Stats Strip ──────────────────────────────────── */}
+            <section style={{
+                borderTop: '1px solid #0D0D0D',
+                borderBottom: '1px solid #0D0D0D',
+                backgroundColor: '#FBFBF2',
+                padding: '2rem 1.5rem',
+            }}>
+                <div style={{ maxWidth: '900px', margin: '0 auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0', textAlign: 'center' }}>
                     {[
-                        { num: '∞', label: 'Questions Generated' },
-                        { num: '0%', label: 'Copyright Risk' },
-                        { num: '100%', label: 'Difficulty Preserved' },
-                    ].map(stat => (
-                        <div key={stat.label} style={{
-                            textAlign: 'center',
-                            padding: '1.75rem 2.5rem',
-                            border: '1px solid #0D0D0D',
-                            borderRadius: '12px',
-                            backgroundColor: '#F5F5EC',
-                            minWidth: '160px',
-                            flex: '0 1 auto',
+                        { num: '10,000+', label: 'Questions' },
+                        { num: '4', label: 'Official Domains' },
+                        { num: 'Adaptive', label: 'MST Algorithm' },
+                        { num: 'Timed', label: 'Exam Format' },
+                    ].map((s, i) => (
+                        <div key={s.label} style={{
+                            padding: '1.5rem 1rem',
+                            borderRight: i < 3 ? '1px solid #D0D0C8' : 'none',
                         }}>
-                            <p style={{
-                                fontFamily: "'Playfair Display', serif",
-                                fontSize: '2.5rem',
-                                fontWeight: 900,
-                                color: '#0D0D0D',
-                                marginBottom: '0.25rem',
-                                lineHeight: 1,
-                            }}>
-                                {stat.num}
-                            </p>
-                            <p style={{
-                                fontFamily: "'Inter', sans-serif",
-                                fontSize: '0.72rem',
-                                color: '#888880',
-                                textTransform: 'uppercase',
-                                letterSpacing: '0.06em',
-                                fontWeight: 500,
-                            }}>
-                                {stat.label}
-                            </p>
+                            <p style={{ fontFamily: "'Playfair Display', serif", fontSize: '2rem', fontWeight: 900, color: '#0D0D0D', marginBottom: '0.2rem' }}>{s.num}</p>
+                            <p style={{ fontFamily: "'Inter', sans-serif", fontSize: '0.72rem', color: '#888880', textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 500 }}>{s.label}</p>
                         </div>
                     ))}
                 </div>
             </section>
 
-            {/* ── How It Works ─────────────────────────────────────── */}
-            <section id="how-it-works" style={{
-                borderTop: '1px solid #D0D0C8',
-                padding: '5rem 1.5rem',
-            }}>
+            {/* ── Domains Section ──────────────────────────────── */}
+            <section id="domains" style={{ padding: '5rem 1.5rem' }}>
                 <div style={{ maxWidth: '900px', margin: '0 auto' }}>
-                    <p style={{
-                        fontFamily: "'Inter', sans-serif",
-                        fontSize: '0.7rem',
-                        fontWeight: 600,
-                        letterSpacing: '0.1em',
-                        textTransform: 'uppercase',
-                        color: '#888880',
-                        marginBottom: '1.5rem',
-                        textAlign: 'center',
-                    }}>
-                        The Engine
+                    <p style={{ fontFamily: "'Inter', sans-serif", fontSize: '0.7rem', fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#888880', marginBottom: '1rem', textAlign: 'center' }}>
+                        Coverage
                     </p>
-                    <h2 style={{
-                        fontFamily: "'Playfair Display', serif",
-                        fontSize: 'clamp(1.8rem, 4vw, 3rem)',
-                        fontWeight: 700,
-                        textAlign: 'center',
-                        marginBottom: '3.5rem',
-                        letterSpacing: '-0.01em',
-                    }}>
-                        Paint vs. Engine doctrine
+                    <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: 'clamp(1.8rem, 4vw, 3rem)', fontWeight: 700, textAlign: 'center', marginBottom: '3rem', letterSpacing: '-0.01em' }}>
+                        Every domain. Every difficulty level.
                     </h2>
-                    <div style={{
-                        display: 'grid',
-                        gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-                        gap: '1.25rem',
-                    }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
                         {[
-                            {
-                                icon: '🎨',
-                                title: 'Paint (Swapped)',
-                                desc: 'Names, places, companies, and surface-level scenarios are completely replaced with new entities.',
-                                tag: 'Changed',
-                                tagColor: '#E6D5F8',
-                            },
-                            {
-                                icon: '⚙️',
-                                title: 'Engine (Preserved)',
-                                desc: 'Mathematical values, grammar traps, logical structures, and difficulty anchors stay 100% identical.',
-                                tag: 'Untouched',
-                                tagColor: '#D4EFD4',
-                            },
-                            {
-                                icon: '🧠',
-                                title: 'Gemini Vision',
-                                desc: 'Gemini 1.5 Flash reads the screenshot, parses the question, and executes the swap in one shot.',
-                                tag: 'AI-Powered',
-                                tagColor: '#FBE9D5',
-                            },
-                        ].map(card => (
-                            <div key={card.title} style={{
-                                padding: '1.75rem',
+                            { domain: 'Heart of Algebra', module: 'Math', count: '2,500+', icon: '∑' },
+                            { domain: 'Advanced Math', module: 'Math', count: '2,200+', icon: 'ƒ' },
+                            { domain: 'Craft & Structure', module: 'Reading & Writing', count: '1,800+', icon: '¶' },
+                            { domain: 'Expression of Ideas', module: 'Reading & Writing', count: '1,900+', icon: '✎' },
+                            { domain: 'Geometry & Trig', module: 'Math', count: '1,600+', icon: '△' },
+                            { domain: 'Information & Ideas', module: 'Reading & Writing', count: '2,100+', icon: '◉' },
+                        ].map(d => (
+                            <div key={d.domain} style={{
+                                padding: '1.5rem',
                                 border: '1px solid #0D0D0D',
-                                borderRadius: '12px',
+                                borderRadius: '10px',
                                 backgroundColor: '#FAFAF2',
                             }}>
-                                <div style={{ fontSize: '1.75rem', marginBottom: '1rem' }}>{card.icon}</div>
+                                <div style={{ fontSize: '1.5rem', marginBottom: '0.75rem', opacity: 0.6 }}>{d.icon}</div>
                                 <span style={{
                                     display: 'inline-block',
-                                    backgroundColor: card.tagColor,
+                                    backgroundColor: d.module === 'Math' ? '#D4EFD4' : '#E6D5F8',
                                     border: '1px solid #0D0D0D',
                                     borderRadius: '9999px',
-                                    padding: '0.15rem 0.6rem',
-                                    fontSize: '0.65rem',
+                                    padding: '0.1rem 0.55rem',
+                                    fontSize: '0.6rem',
                                     fontWeight: 600,
                                     letterSpacing: '0.05em',
                                     textTransform: 'uppercase',
-                                    marginBottom: '0.75rem',
+                                    marginBottom: '0.6rem',
                                     fontFamily: "'Inter', sans-serif",
                                 }}>
-                                    {card.tag}
+                                    {d.module}
                                 </span>
-                                <h3 style={{
-                                    fontFamily: "'Playfair Display', serif",
-                                    fontSize: '1.15rem',
-                                    fontWeight: 700,
-                                    marginBottom: '0.5rem',
-                                }}>
-                                    {card.title}
-                                </h3>
-                                <p style={{
-                                    fontFamily: "'Inter', sans-serif",
-                                    fontSize: '0.85rem',
-                                    lineHeight: 1.65,
-                                    color: '#555550',
-                                }}>
-                                    {card.desc}
-                                </p>
+                                <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: '1rem', fontWeight: 700, marginTop: '0.4rem', marginBottom: '0.3rem' }}>{d.domain}</h3>
+                                <p style={{ fontFamily: "'Inter', sans-serif", fontSize: '0.8rem', color: '#888880' }}>{d.count} questions</p>
                             </div>
                         ))}
                     </div>
                 </div>
             </section>
 
+            {/* ── Angled Bottom-Right Marquee ───────────────────── */}
+            <div style={{
+                position: 'fixed',
+                bottom: '3rem',
+                right: '-20px',
+                width: '420px',
+                backgroundColor: '#0D0D0D',
+                color: '#FBFBF2',
+                padding: '0.55rem 0',
+                transform: 'rotate(-8deg)',
+                transformOrigin: 'bottom right',
+                overflow: 'hidden',
+                zIndex: 5,
+                pointerEvents: 'none',
+            }}>
+                <div style={{
+                    display: 'flex',
+                    whiteSpace: 'nowrap',
+                    animation: 'marquee 18s linear infinite',
+                    fontFamily: "'Inter', sans-serif",
+                    fontSize: '0.72rem',
+                    fontWeight: 500,
+                    letterSpacing: '0.08em',
+                    textTransform: 'uppercase',
+                    gap: '2rem',
+                }}>
+                    {Array(4).fill('Heart of Algebra • Craft & Structure • Advanced Math • Expression of Ideas • ').join('')}
+                </div>
+            </div>
+
+            {/* ── CSS Keyframes ─────────────────────────────────── */}
+            <style>{`
+                @keyframes spin {
+                    from { transform: rotate(0deg); }
+                    to   { transform: rotate(360deg); }
+                }
+                @keyframes marquee {
+                    from { transform: translateX(0); }
+                    to   { transform: translateX(-50%); }
+                }
+            `}</style>
         </div>
-    )
+    );
 }
