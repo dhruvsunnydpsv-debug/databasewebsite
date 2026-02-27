@@ -88,47 +88,48 @@ async function fetchQuestions(stage: Stage, module1Score?: number): Promise<Ques
     for (const tier of tiers) {
         if (tier.count <= 0) continue;
 
-        // Spread questions across domains for this difficulty tier
         const perDomain = Math.ceil(tier.count / domains.length);
         let tierRemaining = tier.count;
+
+        // Collect fetch promises for this tier to run in parallel
+        const tierPromises: Promise<Question[]>[] = [];
 
         for (const domain of domains) {
             if (tierRemaining <= 0) break;
             const fetchCount = Math.min(perDomain, tierRemaining);
+            tierRemaining -= fetchCount;
 
-            try {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
-                const url = `${supabaseUrl}/rest/v1/sat_question_bank?module=eq.${moduleFilter}&domain=eq.${domain}&difficulty=eq.${tier.difficulty}&limit=${fetchCount}&order=random()`;
-                const res = await fetch(url, {
-                    headers: { "apikey": supabaseKey, "Authorization": `Bearer ${supabaseKey}` },
-                    signal: controller.signal,
-                });
-                clearTimeout(timeoutId);
-                if (res.ok) {
-                    const rows: Question[] = await res.json();
-                    if (rows.length > 0) {
-                        results.push(...rows.slice(0, fetchCount));
-                        tierRemaining -= rows.length;
-                    } else {
-                        for (let p = 0; p < fetchCount; p++) {
-                            results.push(makePlaceholder(moduleFilter, tier.difficulty, domain, placeholderIdx++));
-                        }
-                        tierRemaining -= fetchCount;
+            tierPromises.push((async () => {
+                const fetched: Question[] = [];
+                try {
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 2000); // 2s strict timeout
+                    const url = `${supabaseUrl}/rest/v1/sat_question_bank?module=eq.${moduleFilter}&domain=eq.${domain}&difficulty=eq.${tier.difficulty}&limit=${fetchCount}&order=random()`;
+                    const res = await fetch(url, {
+                        headers: { "apikey": supabaseKey, "Authorization": `Bearer ${supabaseKey}` },
+                        signal: controller.signal,
+                    });
+                    clearTimeout(timeoutId);
+                    if (res.ok) {
+                        const rows: Question[] = await res.json();
+                        fetched.push(...rows.slice(0, fetchCount));
                     }
-                } else {
-                    for (let p = 0; p < fetchCount; p++) {
-                        results.push(makePlaceholder(moduleFilter, tier.difficulty, domain, placeholderIdx++));
-                    }
-                    tierRemaining -= fetchCount;
+                } catch {
+                    // Ignore error, will fill with placeholders
                 }
-            } catch {
-                // Timeout, network error, or aborted — fall back to placeholder
-                for (let p = 0; p < fetchCount; p++) {
-                    results.push(makePlaceholder(moduleFilter, tier.difficulty, domain, placeholderIdx++));
+
+                // Fill any missing spots with placeholders
+                while (fetched.length < fetchCount) {
+                    fetched.push(makePlaceholder(moduleFilter, tier.difficulty, domain, placeholderIdx++));
                 }
-                tierRemaining -= fetchCount;
-            }
+                return fetched;
+            })());
+        }
+
+        // Wait for all domain fetches in this tier to complete
+        const tierResults = await Promise.all(tierPromises);
+        for (const tr of tierResults) {
+            results.push(...tr);
         }
     }
 
