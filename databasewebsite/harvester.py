@@ -35,7 +35,7 @@ SUPABASE_URL = os.environ["NEXT_PUBLIC_SUPABASE_URL"]
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ["NEXT_PUBLIC_SUPABASE_ANON_KEY"]
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 
-QUESTIONS_PER_RUN = 100
+QUESTIONS_PER_RUN = 25   # Free-tier safe: 15 RPM limit → 25q with 2–4s delays fits comfortably
 
 # ── Domain meta ──────────────────────────────────────────────
 ALL_BUCKETS = [
@@ -168,26 +168,41 @@ def build_target_queue(supabase: Client) -> list[tuple]:
 # ─────────────────────────────────────────────────────────────
 def generate_question(ai: genai.Client, module: str, domain: str, difficulty: str, is_spr: bool) -> Optional[dict]:
     prompt = build_prompt(module, domain, difficulty, is_spr)
-    try:
-        response = ai.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=prompt,
-            config={"response_mime_type": "application/json"},
-        )
-        raw = response.text.strip()
-        # Strip markdown fences if Gemini wraps in ```json
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-        data = json.loads(raw)
-        return data
-    except json.JSONDecodeError as je:
-        log.error(f"JSON parse error: {je} | Raw: {response.text[:200]}")
-        return None
-    except Exception as e:
-        log.error(f"Gemini error: {e}")
-        return None
+    # Model priority: 1.5-flash has a separate, larger free-tier quota pool
+    models_to_try = ["gemini-1.5-flash", "gemini-1.5-flash-8b", "gemini-2.0-flash"]
+    for model in models_to_try:
+        for attempt in range(3):  # up to 3 retries per model
+            try:
+                response = ai.models.generate_content(
+                    model=model,
+                    contents=prompt,
+                    config={"response_mime_type": "application/json"},
+                )
+                raw = response.text.strip()
+                if raw.startswith("```"):
+                    raw = raw.split("```")[1]
+                    if raw.startswith("json"):
+                        raw = raw[4:]
+                data = json.loads(raw)
+                return data
+            except json.JSONDecodeError as je:
+                log.error(f"JSON parse error ({model}): {je} | Raw: {response.text[:200]}")
+                return None  # Bad JSON isn't a quota issue; don't retry
+            except Exception as e:
+                err_str = str(e)
+                if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                    backoff = 30 * (2 ** attempt)  # 30s, 60s, 120s
+                    log.warning(f"Rate limit on {model} (attempt {attempt+1}). Backing off {backoff}s…")
+                    time.sleep(backoff)
+                else:
+                    log.error(f"Gemini error ({model}): {e}")
+                    break  # Non-quota error; try next model
+        else:
+            log.warning(f"Model {model} exhausted after 3 attempts; trying next model.")
+            continue
+        break  # Reached here means a non-429 error; exit model loop
+    log.error("All models exhausted. Skipping this question.")
+    return None
 
 # ─────────────────────────────────────────────────────────────
 # VALIDATION
