@@ -48,7 +48,7 @@ export async function generateSyntheticQuestion(imageBase64: string, mimeType: s
             }
         });
 
-        const jsonText = response.text();
+        const jsonText = response.text ? response.text() : undefined;
         if (!jsonText) {
             throw new Error("No text returned from Gemini API");
         }
