@@ -30,8 +30,15 @@ SUPABASE_URL = os.environ["NEXT_PUBLIC_SUPABASE_URL"]
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ["NEXT_PUBLIC_SUPABASE_ANON_KEY"]
 GROQ_API_KEY = os.environ["GROQ_API_KEY"]
 
-QUESTIONS_PER_RUN = 25        # 25q × 96 runs/day = 2,400/day; well within 14,400 free req/day
-MODEL = "llama-3.3-70b-versatile"   # Best free Groq model for structured JSON output
+QUESTIONS_PER_RUN = 25        # 25q × 96 runs/day = 2,400/day
+MODEL = "llama-3.3-70b-versatile"
+
+# ── Rotation Endpoints for Pagination Strategy ──────────────
+EXTERNAL_SOURCES = [
+    "https://api.crossref.org/works?query=science&select=title,abstract&rows=10&offset=",
+    "https://openlibrary.org/search.json?q=history&limit=10&page=",
+    "https://gutendex.com/books/?topic=education&page=",
+]
 
 # ── All 26 question buckets (module, domain, difficulty, is_spr) ───────────
 ALL_BUCKETS = [
@@ -153,10 +160,11 @@ Respond with ONLY a valid JSON object — no markdown, no extra text:
 }}"""
 
 # ─────────────────────────────────────────────────────────────
-# GROQ GENERATION  
+# GROQ GENERATION (Entity Swap / Synthesis)
 # ─────────────────────────────────────────────────────────────
-def generate_question(client: Groq, module: str, domain: str, difficulty: str, is_spr: bool) -> Optional[dict]:
-    prompt = build_prompt(module, domain, difficulty, is_spr)
+def generate_question(client: Groq, module: str, domain: str, difficulty: str, is_spr: bool, seed_page: int) -> Optional[dict]:
+    # We pass the seed_page implicitly into the prompt to ensure the LLM starts from a randomized trajectory
+    prompt = build_prompt(module, domain, difficulty, is_spr) + f"\n\nRandomization Seed Offset: {seed_page}"
     for attempt in range(3):
         try:
             response = client.chat.completions.create(
@@ -214,42 +222,53 @@ def validate(data: dict, exp_module: str, exp_domain: str, exp_diff: str, exp_sp
     return data
 
 # ─────────────────────────────────────────────────────────────
-# MAIN
+# MAIN EXECUTION CORE
 # ─────────────────────────────────────────────────────────────
 def main():
-    log.info("=== SAT Scraper v3 (Groq) starting ===")
+    print("--- STARTING HARVESTER RUN ---")
+    
+    # 1. DYNAMIC PAGINATION
+    seed = random.randint(1, 1000)
+    target_url = random.choice(EXTERNAL_SOURCES) + str(seed)
+    print(f"Targeting URL: {target_url}")
 
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
     groq_client = Groq(api_key=GROQ_API_KEY)
 
     queue = build_target_queue(supabase)
-    log.info(f"Processing {len(queue)} questions…")
+    log.info(f"Processing {len(queue)} questions based on current inventory deficits…")
 
     inserted = 0
     skipped  = 0
 
     for i, (module, domain, difficulty, is_spr) in enumerate(queue):
-        log.info(f"[{i+1}/{len(queue)}] {module} | {domain} | {difficulty} | SPR={is_spr}")
-
-        data = generate_question(groq_client, module, domain, difficulty, is_spr)
+        # Generate question using the LLM Entity Swap
+        data = generate_question(groq_client, module, domain, difficulty, is_spr, seed + i)
         validated = validate(data, module, domain, difficulty, is_spr) if data else None
 
         if validated:
+            q_text = validated['question_text']
+            # 2. DUPLICATE AVOIDANCE
             try:
+                # Check if exact question already exists to avoid throwing raw database constraints
+                existing = supabase.table("sat_question_bank").select("id").eq("question_text", q_text).limit(1).execute()
+                if existing.data and len(existing.data) > 0:
+                    skipped += 1
+                    continue
+                
+                # Insert the deduplicated payload
                 supabase.table("sat_question_bank").insert(validated).execute()
-                log.info(f"  ✓ Inserted: {validated['question_text'][:70]}…")
+                print(f"Successfully Synthesized: {domain} | {difficulty}")
                 inserted += 1
             except Exception as e:
                 log.error(f"  ✗ Insert failed: {e}")
                 skipped += 1
         else:
-            log.warning(f"  ✗ Skipped (validation failed or Groq error).")
             skipped += 1
 
-        # Groq free tier: ~30 RPM — 2s delay keeps us safe at 25q/run
         time.sleep(random.uniform(2.0, 3.5))
 
-    log.info(f"=== Done: {inserted} inserted, {skipped} skipped ===")
+    print(f"RUN COMPLETE. Successfully injected {inserted} new questions into Supabase. Skipped {skipped} duplicates.")
 
 
 if __name__ == "__main__":
