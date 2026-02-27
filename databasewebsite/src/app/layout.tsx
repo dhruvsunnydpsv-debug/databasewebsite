@@ -1,12 +1,19 @@
 import type { Metadata } from 'next'
-import { Inter } from 'next/font/google'
+import { Inter, Playfair_Display } from 'next/font/google'
 import './globals.css'
+import AdminBackdoor from './AdminBackdoor'
 
-const inter = Inter({ subsets: ['latin'] })
+const inter = Inter({ subsets: ['latin'], variable: '--font-inter', display: 'swap' })
+const playfair = Playfair_Display({
+    subsets: ['latin'],
+    variable: '--font-playfair',
+    style: ['normal', 'italic'],
+    display: 'swap',
+})
 
 export const metadata: Metadata = {
-    title: 'Digital SAT Admin | Synthesis Platform',
-    description: 'Automated SAT Question Generation and Ingestion Engine',
+    title: 'SAT Synthesis — Digital Question Engine',
+    description: 'Entity-swap pipeline for generating copyright-free SAT questions at scale.',
 }
 
 export default function RootLayout({
@@ -15,27 +22,73 @@ export default function RootLayout({
     children: React.ReactNode
 }) {
     return (
-        <html lang="en">
-            <body className={inter.className}>
-                <div className="min-h-screen bg-slate-50">
-                    <header className="sticky top-0 z-40 border-b bg-white">
-                        <div className="container mx-auto flex h-16 items-center px-4 md:px-6">
-                            <div className="mr-4 hidden md:flex">
-                                <a className="flex items-center space-x-2" href="/">
-                                    <span className="hidden font-bold sm:inline-block">SAT Admin Synthesis</span>
-                                </a>
-                            </div>
-                            <div className="flex flex-1 items-center justify-between space-x-2 md:justify-end">
-                                <nav className="flex items-center space-x-6 text-sm font-medium">
-                                    <a className="transition-colors hover:text-foreground/80 text-foreground" href="/admin/ingestion">Ingestion Dropzone</a>
-                                </nav>
-                            </div>
+        <html lang="en" className={`${inter.variable} ${playfair.variable}`}>
+            <body className={inter.className} style={{ backgroundColor: '#FBFBF2', color: '#0D0D0D', margin: 0 }}>
+
+                {/* ── Header ───────────────────────────────────────────── */}
+                <header style={{ backgroundColor: '#FBFBF2', borderBottom: '1px solid #0D0D0D' }} className="sticky top-0 z-40">
+                    <div style={{ maxWidth: '1100px', margin: '0 auto', padding: '0 1.5rem', display: 'flex', height: '3.5rem', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <a href="/" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <span style={{
+                                fontFamily: "'Playfair Display', serif",
+                                fontWeight: 700,
+                                fontSize: '1.05rem',
+                                letterSpacing: '-0.01em',
+                                color: '#0D0D0D',
+                            }}>
+                                SAT Synthesis
+                            </span>
+                        </a>
+                        <nav style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                            <a
+                                href="/"
+                                style={{
+                                    fontFamily: "'Inter', sans-serif",
+                                    fontSize: '0.8rem',
+                                    fontWeight: 500,
+                                    color: '#555550',
+                                    padding: '0.3rem 0.8rem',
+                                    borderRadius: '9999px',
+                                    textDecoration: 'none',
+                                    transition: 'all 0.15s ease',
+                                }}
+                            >
+                                Home
+                            </a>
+                        </nav>
+                    </div>
+                </header>
+
+                {/* ── Main ─────────────────────────────────────────────── */}
+                <main>
+                    {children}
+                </main>
+
+                {/* ── Footer ───────────────────────────────────────────── */}
+                <footer style={{ borderTop: '1px solid #D0D0C8', backgroundColor: '#FBFBF2', marginTop: '6rem' }}>
+                    <div style={{
+                        maxWidth: '1100px',
+                        margin: '0 auto',
+                        padding: '2rem 1.5rem',
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '1rem',
+                    }}>
+                        <p style={{ fontFamily: "'Inter', sans-serif", fontSize: '0.72rem', color: '#888880', margin: 0 }}>
+                            © 2025 Digital SAT Synthesis. All rights reserved.
+                        </p>
+                        <div style={{ display: 'flex', gap: '1.5rem' }}>
+                            <a href="#" style={{ fontFamily: "'Inter', sans-serif", fontSize: '0.72rem', color: '#888880', textDecoration: 'none' }}>Privacy Policy</a>
+                            <a href="#" style={{ fontFamily: "'Inter', sans-serif", fontSize: '0.72rem', color: '#888880', textDecoration: 'none' }}>Terms of Use</a>
                         </div>
-                    </header>
-                    <main className="container mx-auto py-6 px-4 md:px-6">
-                        {children}
-                    </main>
-                </div>
+                    </div>
+                </footer>
+
+                {/* ── Hidden Admin Backdoor (Client Component) ─────────── */}
+                <AdminBackdoor />
+
             </body>
         </html>
     )

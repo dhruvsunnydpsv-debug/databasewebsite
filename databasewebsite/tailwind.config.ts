@@ -9,42 +9,70 @@ const config: Config = {
     theme: {
         extend: {
             colors: {
-                background: "hsl(var(--background))",
-                foreground: "hsl(var(--foreground))",
+                cream: "#FBFBF2",
+                "cream-dark": "#F0F0E8",
+                ink: "#0D0D0D",
+                "ink-muted": "#555550",
+                lavender: "#E6D5F8",
+                "lavender-dark": "#D4BFEF",
+                background: "#FBFBF2",
+                foreground: "#0D0D0D",
                 card: {
-                    DEFAULT: "hsl(var(--card))",
-                    foreground: "hsl(var(--card-foreground))",
+                    DEFAULT: "#F5F5EC",
+                    foreground: "#0D0D0D",
                 },
                 popover: {
-                    DEFAULT: "hsl(var(--popover))",
-                    foreground: "hsl(var(--popover-foreground))",
+                    DEFAULT: "#FBFBF2",
+                    foreground: "#0D0D0D",
                 },
                 primary: {
-                    DEFAULT: "hsl(var(--primary))",
-                    foreground: "hsl(var(--primary-foreground))",
+                    DEFAULT: "#0D0D0D",
+                    foreground: "#FBFBF2",
                 },
                 secondary: {
-                    DEFAULT: "hsl(var(--secondary))",
-                    foreground: "hsl(var(--secondary-foreground))",
+                    DEFAULT: "#E6D5F8",
+                    foreground: "#0D0D0D",
                 },
                 muted: {
-                    DEFAULT: "hsl(var(--muted))",
-                    foreground: "hsl(var(--muted-foreground))",
+                    DEFAULT: "#F0F0E8",
+                    foreground: "#888880",
                 },
                 accent: {
-                    DEFAULT: "hsl(var(--accent))",
-                    foreground: "hsl(var(--accent-foreground))",
+                    DEFAULT: "#E6D5F8",
+                    foreground: "#0D0D0D",
                 },
                 destructive: {
-                    DEFAULT: "hsl(var(--destructive))",
-                    foreground: "hsl(var(--destructive-foreground))",
+                    DEFAULT: "hsl(0, 84%, 60%)",
+                    foreground: "#FBFBF2",
                 },
-                border: "hsl(var(--border))",
-                input: "hsl(var(--input))",
-                ring: "hsl(var(--ring))",
+                border: "#D0D0C8",
+                input: "#D0D0C8",
+                ring: "#0D0D0D",
+            },
+            fontFamily: {
+                serif: ["Playfair Display", "Georgia", "serif"],
+                sans: ["Inter", "system-ui", "sans-serif"],
+            },
+            borderRadius: {
+                pill: "9999px",
+            },
+            animation: {
+                "float-slow": "float 6s ease-in-out infinite",
+                "fade-in": "fadeIn 0.4s ease-out",
+            },
+            keyframes: {
+                float: {
+                    "0%, 100%": { transform: "translateY(0px)" },
+                    "50%": { transform: "translateY(-8px)" },
+                },
+                fadeIn: {
+                    "0%": { opacity: "0", transform: "translateY(8px)" },
+                    "100%": { opacity: "1", transform: "translateY(0)" },
+                },
             },
         },
     },
     plugins: [],
 };
+
 export default config;

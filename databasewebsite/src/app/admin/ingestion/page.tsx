@@ -38,18 +38,10 @@ export default function IngestionPage() {
             });
 
             const json = await res.json();
-
-            if (!res.ok) {
-                throw new Error(json.error || "Failed to process image");
-            }
+            if (!res.ok) throw new Error(json.error || "Failed to process image");
 
             setSuccessData(json.data);
-
-            // Auto clear after 4 seconds to allow rapid scanning
-            setTimeout(() => {
-                setSuccessData(null);
-            }, 4000);
-
+            setTimeout(() => setSuccessData(null), 6000);
         } catch (err: any) {
             setError(err.message);
         } finally {
@@ -60,126 +52,255 @@ export default function IngestionPage() {
     const handleDrop = useCallback((e: React.DragEvent) => {
         e.preventDefault();
         setIsDragging(false);
-
         const file = e.dataTransfer.files[0];
-        if (file) {
-            processFile(file);
-        }
+        if (file) processFile(file);
     }, []);
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
-        if (file) {
-            processFile(file);
-        }
+        if (file) processFile(file);
     };
 
     return (
-        <div className="max-w-4xl mx-auto space-y-8">
-            <div>
-                <h1 className="text-3xl font-bold tracking-tight">Admin Ingestion Dropzone</h1>
-                <p className="text-muted-foreground mt-2">
-                    Drag and drop a raw SAT question screenshot here. The Synthetic Spin engine will automatically generate a new variant and insert it into the database.
+        <div style={{ maxWidth: '720px', margin: '0 auto', padding: '4rem 1.5rem' }}>
+
+            {/* ── Page Header ─────────────────────────────────── */}
+            <div style={{ marginBottom: '2.5rem' }}>
+                <span style={{
+                    display: 'inline-block',
+                    backgroundColor: '#E6D5F8',
+                    border: '1px solid #0D0D0D',
+                    borderRadius: '9999px',
+                    padding: '0.2rem 0.75rem',
+                    fontSize: '0.65rem',
+                    fontWeight: 600,
+                    letterSpacing: '0.08em',
+                    textTransform: 'uppercase',
+                    fontFamily: "'Inter', sans-serif",
+                    marginBottom: '1rem',
+                }}>
+                    Admin — Ingestion Engine
+                </span>
+                <h1 style={{
+                    fontFamily: "'Playfair Display', serif",
+                    fontSize: 'clamp(2rem, 5vw, 3rem)',
+                    fontWeight: 900,
+                    lineHeight: 1.1,
+                    letterSpacing: '-0.02em',
+                    color: '#0D0D0D',
+                    marginBottom: '0.75rem',
+                }}>
+                    Question Dropzone
+                </h1>
+                <p style={{
+                    fontFamily: "'Inter', sans-serif",
+                    fontSize: '0.9rem',
+                    lineHeight: 1.7,
+                    color: '#555550',
+                    maxWidth: '520px',
+                }}>
+                    Drop a raw SAT screenshot below. The Synthetic Spin engine will apply
+                    the <em>Paint vs. Engine</em> doctrine and insert a copyright-free variant into the database.
                 </p>
             </div>
 
+            {/* ── Dropzone ─────────────────────────────────────── */}
             <div
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
-                className={`relative flex flex-col items-center justify-center p-12 mt-8 border-2 border-dashed rounded-xl transition-all duration-200 ${isDragging
-                        ? "border-primary bg-primary/5"
-                        : "border-slate-300 hover:border-primary/50 bg-white"
-                    }`}
+                style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '3.5rem 2rem',
+                    border: isDragging ? '2px dashed #7C4DFF' : '2px dashed #0D0D0D',
+                    borderRadius: '12px',
+                    backgroundColor: isDragging ? '#F0E8FF' : '#FAFAF2',
+                    cursor: 'default',
+                    transition: 'all 0.2s ease',
+                    marginBottom: '1.5rem',
+                }}
             >
-                <div className="flex flex-col items-center justify-center space-y-4 text-center">
-                    {isSpinning ? (
-                        <Loader2 className="h-12 w-12 animate-spin text-primary" />
-                    ) : (
-                        <UploadCloud className={`h-12 w-12 ${isDragging ? "text-primary" : "text-slate-400"}`} />
-                    )}
+                {isSpinning ? (
+                    <Loader2
+                        style={{
+                            width: '2.5rem',
+                            height: '2.5rem',
+                            color: '#7C4DFF',
+                            animation: 'spin 1s linear infinite',
+                        }}
+                    />
+                ) : (
+                    <UploadCloud style={{
+                        width: '2.5rem',
+                        height: '2.5rem',
+                        color: isDragging ? '#7C4DFF' : '#888880',
+                        marginBottom: '1rem',
+                        transition: 'color 0.2s ease',
+                    }} />
+                )}
 
-                    <div className="space-y-1">
-                        <p className="text-sm font-medium text-slate-700">
-                            {isSpinning ? "Synthesizing new question..." : "Drag & drop an image here"}
+                <p style={{
+                    fontFamily: "'Inter', sans-serif",
+                    fontSize: '0.9rem',
+                    fontWeight: 500,
+                    color: '#0D0D0D',
+                    marginBottom: '0.25rem',
+                }}>
+                    {isSpinning ? "Synthesizing variant…" : "Drag & drop a question screenshot"}
+                </p>
+
+                {!isSpinning && (
+                    <>
+                        <p style={{
+                            fontFamily: "'Inter', sans-serif",
+                            fontSize: '0.75rem',
+                            color: '#888880',
+                            marginBottom: '1.5rem',
+                        }}>
+                            PNG, JPG, WEBP — up to 5 MB
                         </p>
-                        {!isSpinning && (
-                            <p className="text-xs text-slate-500">
-                                PNG, JPG, WEBP up to 5MB
-                            </p>
-                        )}
-                    </div>
-
-                    {!isSpinning && (
-                        <div className="mt-4">
-                            <label htmlFor="file-upload" className="cursor-pointer inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 disabled:pointer-events-none ring-offset-background border border-input bg-background hover:bg-slate-100 h-9 px-4 py-2">
+                        <div>
+                            <label
+                                htmlFor="file-upload"
+                                style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    backgroundColor: '#E6D5F8',
+                                    color: '#0D0D0D',
+                                    border: '1px solid #0D0D0D',
+                                    borderRadius: '9999px',
+                                    padding: '0.55rem 1.5rem',
+                                    fontFamily: "'Inter', sans-serif",
+                                    fontSize: '0.825rem',
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                    transition: 'background-color 0.15s ease',
+                                }}
+                            >
                                 Browse Files
                             </label>
                             <input
                                 id="file-upload"
                                 type="file"
-                                className="hidden"
                                 accept="image/*"
                                 onChange={handleFileChange}
+                                style={{ display: 'none' }}
                             />
+                        </div>
+                    </>
+                )}
+            </div>
+
+            {/* ── Error State ──────────────────────────────────── */}
+            {error && (
+                <div style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '0.75rem',
+                    padding: '1rem 1.25rem',
+                    backgroundColor: '#FFF5F5',
+                    border: '1px solid #0D0D0D',
+                    borderRadius: '10px',
+                    marginBottom: '1.5rem',
+                }}>
+                    <AlertCircle style={{ width: '1.1rem', height: '1.1rem', color: '#C0392B', flexShrink: 0, marginTop: '1px' }} />
+                    <div>
+                        <p style={{ fontFamily: "'Inter', sans-serif", fontSize: '0.8rem', fontWeight: 600, color: '#0D0D0D', marginBottom: '0.15rem' }}>
+                            Processing Error
+                        </p>
+                        <p style={{ fontFamily: "'Inter', sans-serif", fontSize: '0.8rem', color: '#555550' }}>{error}</p>
+                    </div>
+                </div>
+            )}
+
+            {/* ── Success Output ───────────────────────────────── */}
+            {successData && (
+                <div style={{
+                    padding: '1.5rem',
+                    border: '1px solid #0D0D0D',
+                    borderRadius: '12px',
+                    backgroundColor: '#F5FFF7',
+                }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.25rem' }}>
+                        <CheckCircle2 style={{ width: '1.1rem', height: '1.1rem', color: '#2ECC71' }} />
+                        <p style={{ fontFamily: "'Inter', sans-serif", fontSize: '0.8rem', fontWeight: 600, color: '#0D0D0D' }}>
+                            Synthesized & inserted into database
+                        </p>
+                    </div>
+
+                    {/* Meta Badges */}
+                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1.25rem' }}>
+                        {[successData.module, successData.difficulty, successData.domain].filter(Boolean).map((tag: string) => (
+                            <span key={tag} style={{
+                                display: 'inline-block',
+                                backgroundColor: '#E6D5F8',
+                                border: '1px solid #0D0D0D',
+                                borderRadius: '9999px',
+                                padding: '0.15rem 0.65rem',
+                                fontSize: '0.65rem',
+                                fontFamily: "'Inter', sans-serif",
+                                fontWeight: 600,
+                                letterSpacing: '0.05em',
+                                textTransform: 'uppercase',
+                            }}>
+                                {tag}
+                            </span>
+                        ))}
+                    </div>
+
+                    {/* Question Text */}
+                    <p style={{
+                        fontFamily: "'Playfair Display', serif",
+                        fontSize: '1rem',
+                        fontWeight: 500,
+                        lineHeight: 1.65,
+                        color: '#0D0D0D',
+                        marginBottom: '1.25rem',
+                    }}>
+                        {successData.question_text}
+                    </p>
+
+                    {/* Options */}
+                    {successData.options && (
+                        <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 1.25rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                            {successData.options.map((opt: string, i: number) => (
+                                <li key={i} style={{
+                                    display: 'flex',
+                                    alignItems: 'baseline',
+                                    gap: '0.625rem',
+                                    padding: '0.6rem 0.875rem',
+                                    border: '1px solid #D0D0C8',
+                                    borderRadius: '8px',
+                                    backgroundColor: '#FDFDF5',
+                                    fontFamily: "'Inter', sans-serif",
+                                    fontSize: '0.85rem',
+                                    color: '#0D0D0D',
+                                }}>
+                                    <span style={{ fontWeight: 700, minWidth: '1.2rem' }}>{String.fromCharCode(65 + i)}.</span>
+                                    {opt}
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+
+                    {/* Correct Answer */}
+                    {successData.correct_answer && (
+                        <div style={{
+                            paddingTop: '1rem',
+                            borderTop: '1px solid #D0D0C8',
+                        }}>
+                            <p style={{ fontFamily: "'Inter', sans-serif", fontSize: '0.8rem', color: '#0D0D0D' }}>
+                                <strong>Correct Answer:</strong> {successData.correct_answer}
+                            </p>
                         </div>
                     )}
                 </div>
-            </div>
+            )}
 
-            {/* Status Messages */}
-            {
-                error && (
-                    <div className="rounded-lg bg-red-50 p-4 border border-red-200 flex items-start space-x-3">
-                        <AlertCircle className="h-5 w-5 text-red-600 shrink-0 mt-0.5" />
-                        <div>
-                            <h3 className="text-sm font-medium text-red-800">Processing Error</h3>
-                            <p className="mt-1 text-sm text-red-700">{error}</p>
-                        </div>
-                    </div>
-                )
-            }
-
-            {
-                successData && (
-                    <div className="rounded-lg bg-emerald-50 p-4 border border-emerald-200 animate-in fade-in slide-in-from-bottom-2">
-                        <div className="flex items-start space-x-3">
-                            <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0 mt-0.5" />
-                            <div className="flex-1">
-                                <h3 className="text-sm font-medium text-emerald-800">
-                                    Successfully synthesized and inserted!
-                                </h3>
-
-                                <div className="mt-4 bg-white rounded border border-emerald-100 p-4 shadow-sm">
-                                    <div className="flex justify-between items-center mb-2">
-                                        <span className="text-xs font-semibold text-emerald-600 uppercase tracking-wide">
-                                            {successData.module} | {successData.difficulty}
-                                        </span>
-                                        <span className="text-xs text-slate-500">{successData.domain}</span>
-                                    </div>
-                                    <p className="text-sm font-medium text-slate-900 mt-2">{successData.question_text}</p>
-
-                                    {successData.options && (
-                                        <ul className="mt-4 space-y-2">
-                                            {successData.options.map((opt: string, i: number) => (
-                                                <li key={i} className="text-sm bg-slate-50 p-2 rounded border border-slate-100">
-                                                    <span className="font-medium mr-2">{String.fromCharCode(65 + i)})</span> {opt}
-                                                </li>
-                                            ))}
-                                        </ul>
-                                    )}
-
-                                    <div className="mt-4 pt-4 border-t border-slate-100">
-                                        <p className="text-sm text-emerald-700">
-                                            <span className="font-semibold">Correct Answer:</span> {successData.correct_answer}
-                                        </p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                )
-            }
-        </div >
+        </div>
     );
 }

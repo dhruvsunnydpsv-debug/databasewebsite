@@ -2,58 +2,133 @@
 @tailwind components;
 @tailwind utilities;
 
-@layer base {
-  :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
-    --radius: 0.5rem;
-  }
- 
-  .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
-  }
+/* ── Editorial Cream Design System ─────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400;1,700&family=Inter:wght@300;400;500;600&display=swap');
+
+:root {
+  --cream: #FBFBF2;
+  --cream-dark: #F0F0E8;
+  --ink: #0D0D0D;
+  --ink-muted: #555550;
+  --lavender: #E6D5F8;
+  --lavender-dark: #D4BFEF;
+  --border-crisp: 1px solid #0D0D0D;
+  --border-muted: 1px solid #D0D0C8;
+  --background: var(--cream);
+  --foreground: var(--ink);
+  --radius: 9999px;
+
+  /* Shadcn compat */
+  --card: #F5F5EC;
+  --card-foreground: #0D0D0D;
+  --popover: #FBFBF2;
+  --popover-foreground: #0D0D0D;
+  --primary: #0D0D0D;
+  --primary-foreground: #FBFBF2;
+  --secondary: #E6D5F8;
+  --secondary-foreground: #0D0D0D;
+  --muted: #F0F0E8;
+  --muted-foreground: #888880;
+  --accent: #E6D5F8;
+  --accent-foreground: #0D0D0D;
+  --destructive: hsl(0, 84%, 60%);
+  --destructive-foreground: #FBFBF2;
+  --border: #D0D0C8;
+  --input: #D0D0C8;
+  --ring: #0D0D0D;
 }
- 
+
 @layer base {
   * {
-    @apply border-border;
+    box-sizing: border-box;
+    border-color: var(--border);
   }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
   body {
-    @apply bg-slate-50 text-foreground;
+    background-color: var(--cream);
+    color: var(--ink);
+    font-family: 'Inter', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: 'Playfair Display', serif;
+    letter-spacing: -0.01em;
+  }
+}
+
+/* ── Utility Classes ─────────────────────────────────────────── */
+@layer utilities {
+  .font-serif {
+    font-family: 'Playfair Display', serif;
+  }
+
+  .font-sans {
+    font-family: 'Inter', sans-serif;
+  }
+
+  .pill-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    background-color: var(--lavender);
+    color: var(--ink);
+    border: var(--border-crisp);
+    border-radius: 9999px;
+    padding: 0.625rem 1.5rem;
+    font-family: 'Inter', sans-serif;
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 0.15s ease, transform 0.1s ease;
+  }
+
+  .pill-btn:hover {
+    background-color: var(--lavender-dark);
+    transform: translateY(-1px);
+  }
+
+  .pill-btn:active {
+    transform: translateY(0);
+  }
+
+  .pill-btn-ink {
+    background-color: var(--ink);
+    color: var(--cream);
+    border: var(--border-crisp);
+    border-radius: 9999px;
+  }
+
+  .pill-btn-ink:hover {
+    background-color: #2a2a2a;
+  }
+
+  .editorial-card {
+    background-color: #FAFAF2;
+    border: var(--border-crisp);
+    border-radius: 12px;
+  }
+
+  .floating-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    background-color: var(--lavender);
+    border: var(--border-crisp);
+    border-radius: 9999px;
+    padding: 0.25rem 0.875rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    font-family: 'Inter', sans-serif;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
   }
 }
