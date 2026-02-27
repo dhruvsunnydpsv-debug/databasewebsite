@@ -97,17 +97,20 @@ async function fetchQuestions(stage: Stage, module1Score?: number): Promise<Ques
             const fetchCount = Math.min(perDomain, tierRemaining);
 
             try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
                 const url = `${supabaseUrl}/rest/v1/sat_question_bank?module=eq.${moduleFilter}&domain=eq.${domain}&difficulty=eq.${tier.difficulty}&limit=${fetchCount}&order=random()`;
                 const res = await fetch(url, {
-                    headers: { "apikey": supabaseKey, "Authorization": `Bearer ${supabaseKey}` }
+                    headers: { "apikey": supabaseKey, "Authorization": `Bearer ${supabaseKey}` },
+                    signal: controller.signal,
                 });
+                clearTimeout(timeoutId);
                 if (res.ok) {
                     const rows: Question[] = await res.json();
                     if (rows.length > 0) {
                         results.push(...rows.slice(0, fetchCount));
                         tierRemaining -= rows.length;
                     } else {
-                        // No questions yet — generate placeholders so test always loads
                         for (let p = 0; p < fetchCount; p++) {
                             results.push(makePlaceholder(moduleFilter, tier.difficulty, domain, placeholderIdx++));
                         }
@@ -120,6 +123,7 @@ async function fetchQuestions(stage: Stage, module1Score?: number): Promise<Ques
                     tierRemaining -= fetchCount;
                 }
             } catch {
+                // Timeout, network error, or aborted — fall back to placeholder
                 for (let p = 0; p < fetchCount; p++) {
                     results.push(makePlaceholder(moduleFilter, tier.difficulty, domain, placeholderIdx++));
                 }
@@ -165,10 +169,22 @@ export default function TestSessionPage() {
         setAnswers({});
         setFreeText({});
         setMarked(new Set());
-        const qs = await fetchQuestions(s, score);
-        setQuestions(qs);
-        setTimerSec(STAGE_CONFIG[s].seconds);
-        setPhase("testing");
+        try {
+            const qs = await fetchQuestions(s, score);
+            setQuestions(qs);
+        } catch {
+            // Absolute worst-case: fill with placeholders so it never stays stuck
+            const cfg = STAGE_CONFIG[s];
+            const isMath = cfg.subject === "math";
+            const mod = isMath ? "Math" : "Reading_Writing";
+            const fallback: Question[] = Array.from({ length: cfg.count }, (_, i) =>
+                makePlaceholder(mod, "Medium", "General", i)
+            );
+            setQuestions(fallback);
+        } finally {
+            setTimerSec(STAGE_CONFIG[s].seconds);
+            setPhase("testing");  // ALWAYS advance — never stuck on loading
+        }
     }, []);
 
     useEffect(() => { loadStage(1); }, []);
