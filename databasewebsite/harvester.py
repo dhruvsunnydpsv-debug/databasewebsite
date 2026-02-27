@@ -1,19 +1,14 @@
 """
-scraper.py — SAT Automated Harvester v2
-=======================================
-Runs every 15 minutes via GitHub Actions.
-Per run:
-  1. Queries Supabase view_inventory to find under-represented domain/difficulty buckets.
-  2. Builds a TARGET QUEUE of ~100 questions, weighted toward the thinnest buckets.
-  3. Generates questions using Gemini API (no raw scraping needed — Gemini synthesizes
-     College-Board-style questions directly for each bucket).
-  4. Issues entity-swap + categorization in one combined prompt.
-  5. Inserts validated records into sat_question_bank.
+harvester.py — SAT Automated Harvester v3 (Groq-powered)
+=========================================================
+Runs every 15 min via GitHub Actions.
+Uses Groq's free API (Llama 3.3-70b) — 14,400 req/day free, no credit card.
 
-Anti-ban / rate-limit controls:
-  - Random delay between Gemini calls (1.5–4.0 s).
-  - Gemini API has per-minute quota; we respect it with delays.
-  - Each call generates 1 question → 100 calls / run.
+Per run:
+  1. Reads sat_question_bank to compute per-bucket deficits (self-balancing).
+  2. Builds a 25-question queue weighted toward thinnest domain/difficulty buckets.
+  3. Calls Groq API (llama-3.3-70b-versatile) to synthesize + entity-swap each question.
+  4. Validates JSON schema and inserts into Supabase.
 """
 
 import os
@@ -23,7 +18,7 @@ import random
 import time
 from typing import Optional
 from supabase import create_client, Client
-from google import genai
+from groq import Groq
 
 # ─────────────────────────────────────────────────────────────
 # CONFIG
@@ -33,213 +28,188 @@ log = logging.getLogger(__name__)
 
 SUPABASE_URL = os.environ["NEXT_PUBLIC_SUPABASE_URL"]
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ["NEXT_PUBLIC_SUPABASE_ANON_KEY"]
-GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
+GROQ_API_KEY = os.environ["GROQ_API_KEY"]
 
-QUESTIONS_PER_RUN = 25   # Free-tier safe: 15 RPM limit → 25q with 2–4s delays fits comfortably
+QUESTIONS_PER_RUN = 25        # 25q × 96 runs/day = 2,400/day; well within 14,400 free req/day
+MODEL = "llama-3.3-70b-versatile"   # Best free Groq model for structured JSON output
 
-# ── Domain meta ──────────────────────────────────────────────
+# ── All 26 question buckets (module, domain, difficulty, is_spr) ───────────
 ALL_BUCKETS = [
-    # (module, domain, difficulty, is_spr_possible, target_ratio)
-    # Math — 70% of run → 70 q
-    ("Math", "Heart_of_Algebra",        "Easy",   False, 0.044),
-    ("Math", "Heart_of_Algebra",        "Medium", False, 0.062),
-    ("Math", "Heart_of_Algebra",        "Hard",   False, 0.044),
-    ("Math", "Heart_of_Algebra",        "Hard",   True,  0.018),  # SPR Hard
-    ("Math", "Advanced_Math",           "Easy",   False, 0.044),
-    ("Math", "Advanced_Math",           "Medium", False, 0.062),
-    ("Math", "Advanced_Math",           "Hard",   False, 0.044),
-    ("Math", "Advanced_Math",           "Hard",   True,  0.018),  # SPR Hard
-    ("Math", "Problem_Solving_Data",    "Easy",   False, 0.025),
-    ("Math", "Problem_Solving_Data",    "Medium", False, 0.038),
-    ("Math", "Problem_Solving_Data",    "Hard",   False, 0.025),
-    ("Math", "Geometry_Trigonometry",   "Easy",   False, 0.025),
-    ("Math", "Geometry_Trigonometry",   "Medium", False, 0.038),
-    ("Math", "Geometry_Trigonometry",   "Hard",   False, 0.025),
-    # RW — 30% of run → 30 q
-    ("Reading_Writing", "Information_and_Ideas",         "Easy",   False, 0.025),
-    ("Reading_Writing", "Information_and_Ideas",         "Medium", False, 0.038),
-    ("Reading_Writing", "Information_and_Ideas",         "Hard",   False, 0.025),
-    ("Reading_Writing", "Craft_and_Structure",           "Easy",   False, 0.025),
-    ("Reading_Writing", "Craft_and_Structure",           "Medium", False, 0.038),
-    ("Reading_Writing", "Craft_and_Structure",           "Hard",   False, 0.025),
-    ("Reading_Writing", "Expression_of_Ideas",           "Easy",   False, 0.019),
-    ("Reading_Writing", "Expression_of_Ideas",           "Medium", False, 0.025),
-    ("Reading_Writing", "Expression_of_Ideas",           "Hard",   False, 0.019),
-    ("Reading_Writing", "Standard_English_Conventions",  "Easy",   False, 0.019),
-    ("Reading_Writing", "Standard_English_Conventions",  "Medium", False, 0.025),
-    ("Reading_Writing", "Standard_English_Conventions",  "Hard",   False, 0.019),
+    # Math — Heart of Algebra (~35%)
+    ("Math", "Heart_of_Algebra",        "Easy",   False),
+    ("Math", "Heart_of_Algebra",        "Medium", False),
+    ("Math", "Heart_of_Algebra",        "Hard",   False),
+    ("Math", "Heart_of_Algebra",        "Hard",   True),   # SPR (grid-in)
+    # Math — Advanced Math (~35%)
+    ("Math", "Advanced_Math",           "Easy",   False),
+    ("Math", "Advanced_Math",           "Medium", False),
+    ("Math", "Advanced_Math",           "Hard",   False),
+    ("Math", "Advanced_Math",           "Hard",   True),   # SPR
+    # Math — Problem Solving & Data Analysis (~15%)
+    ("Math", "Problem_Solving_Data",    "Easy",   False),
+    ("Math", "Problem_Solving_Data",    "Medium", False),
+    ("Math", "Problem_Solving_Data",    "Hard",   False),
+    # Math — Geometry & Trigonometry (~15%)
+    ("Math", "Geometry_Trigonometry",   "Easy",   False),
+    ("Math", "Geometry_Trigonometry",   "Medium", False),
+    ("Math", "Geometry_Trigonometry",   "Hard",   False),
+    # Reading & Writing — Information and Ideas (~26%)
+    ("Reading_Writing", "Information_and_Ideas",        "Easy",   False),
+    ("Reading_Writing", "Information_and_Ideas",        "Medium", False),
+    ("Reading_Writing", "Information_and_Ideas",        "Hard",   False),
+    # Reading & Writing — Craft and Structure (~28%)
+    ("Reading_Writing", "Craft_and_Structure",          "Easy",   False),
+    ("Reading_Writing", "Craft_and_Structure",          "Medium", False),
+    ("Reading_Writing", "Craft_and_Structure",          "Hard",   False),
+    # Reading & Writing — Expression of Ideas (~20%)
+    ("Reading_Writing", "Expression_of_Ideas",          "Easy",   False),
+    ("Reading_Writing", "Expression_of_Ideas",          "Medium", False),
+    ("Reading_Writing", "Expression_of_Ideas",          "Hard",   False),
+    # Reading & Writing — Standard English Conventions (~26%)
+    ("Reading_Writing", "Standard_English_Conventions", "Easy",   False),
+    ("Reading_Writing", "Standard_English_Conventions", "Medium", False),
+    ("Reading_Writing", "Standard_English_Conventions", "Hard",   False),
 ]
 
-# ─────────────────────────────────────────────────────────────
-# COMBINED CATEGORIZATION + ENTITY SWAP PROMPT
-# ─────────────────────────────────────────────────────────────
-def build_prompt(module: str, domain: str, difficulty: str, is_spr: bool) -> str:
-    domain_display = domain.replace("_", " ")
-    module_display = "Math" if module == "Math" else "Reading & Writing"
-    spr_note = (
-        "This question is a Student-Produced Response (SPR / grid-in). "
-        "There are NO multiple-choice options. The student must calculate and enter the answer. "
-        "Set is_spr=true and options=null."
-    ) if is_spr else (
-        "This question has 4 multiple-choice options (A, B, C, D). "
-        "Set is_spr=false and provide exactly 4 distinct options."
-    )
-
-    return f"""You are an elite Digital SAT question architect and copyright-sanitization engine.
-
-TASK:
-Generate one brand-new Digital SAT question with these EXACT attributes:
-  - Section  : {module_display}
-  - Domain   : {domain_display}
-  - Difficulty: {difficulty}
-  - {spr_note}
-
-ENTITY SWAP RULES (mandatory):
-1. Use entirely fictional names, places, companies, and scenarios.
-2. Do NOT copy any question, sentence, or passage verbatim from any real SAT exam.
-3. Preserve all mathematical logic, equation structures, and grammar conventions exactly as the College Board would.
-4. The difficulty MUST match {difficulty}: Easy = single-step, Medium = 2-3 steps, Hard = multi-concept or trap answers.
-
-OUTPUT FORMAT — respond with ONLY a JSON object, no markdown, no extra text:
-{{
-  "module": "{module}",
-  "domain": "{domain}",
-  "difficulty": "{difficulty}",
-  "is_spr": {str(is_spr).lower()},
-  "question_text": "<full question text, including any passage for RW>",
-  "options": {("null" if is_spr else '["<option A>", "<option B>", "<option C>", "<option D>"]')},
-  "correct_answer": "<exact text of correct option OR exact numeric value for SPR>",
-  "rationale": "<1–2 sentence explanation of why the answer is correct>"
-}}"""
+TARGET_PER_BUCKET = 500  # Long-term target; drives deficit weighting
 
 # ─────────────────────────────────────────────────────────────
-# TARGET QUEUE BUILDER (self-balancing)
+# SELF-BALANCING QUEUE BUILDER
 # ─────────────────────────────────────────────────────────────
-def build_target_queue(supabase: Client) -> list[tuple]:
-    """
-    Queries view_inventory to determine which buckets are thinnest.
-    Returns a list of (module, domain, difficulty, is_spr) tuples totalling ~QUESTIONS_PER_RUN.
-    Thinner buckets receive proportionally more weight.
-    """
-    log.info("Querying view_inventory for self-balancing analysis...")
-    
-    # Fetch current counts
-    existing: dict[tuple, int] = {}
+def build_target_queue(supabase: Client) -> list:
+    log.info("Querying inventory for self-balancing analysis…")
+
+    existing: dict = {}
     try:
         rows = supabase.table("sat_question_bank").select("module, domain, difficulty, is_spr").execute()
         for r in rows.data:
-            key = (r["module"], r["domain"], r["difficulty"], r.get("is_spr", False))
+            key = (r["module"], r["domain"], r["difficulty"], bool(r.get("is_spr", False)))
             existing[key] = existing.get(key, 0) + 1
     except Exception as e:
-        log.warning(f"Could not read inventory (table might be empty): {e}")
+        log.warning(f"Could not read inventory (table may be empty): {e}")
 
-    # Compute deficit score for each bucket
-    # deficit = max(0, expected_count - actual_count) + 1
-    # Higher deficit → more questions this run
-    TARGET_TOTAL = 500  # long-term target per bucket
+    # Score each bucket by deficit — emptier = higher weight
     scores = []
     for bucket in ALL_BUCKETS:
-        module, domain, difficulty, is_spr, _ = bucket
-        key = (module, domain, difficulty, is_spr)
-        actual = existing.get(key, 0)
-        deficit = max(0, TARGET_TOTAL - actual) + 1
+        module, domain, difficulty, is_spr = bucket
+        actual = existing.get(bucket, 0)
+        deficit = max(0, TARGET_PER_BUCKET - actual) + 1
         scores.append((module, domain, difficulty, is_spr, deficit))
-        log.info(f"  {module} | {domain} | {difficulty} | SPR={is_spr} → {actual} questions (deficit {deficit})")
+        log.info(f"  {module} | {domain} | {difficulty} | SPR={is_spr} → {actual} (deficit {deficit})")
 
-    # Normalize deficits into slot allocations summing to QUESTIONS_PER_RUN
     total_deficit = sum(s[4] for s in scores)
-    queue: list[tuple] = []
+    queue = []
     for module, domain, difficulty, is_spr, deficit in scores:
         slots = max(1, round((deficit / total_deficit) * QUESTIONS_PER_RUN))
         for _ in range(slots):
             queue.append((module, domain, difficulty, is_spr))
 
-    # Trim or pad to exact QUESTIONS_PER_RUN
     random.shuffle(queue)
     queue = queue[:QUESTIONS_PER_RUN]
     while len(queue) < QUESTIONS_PER_RUN:
         queue.append(random.choice(queue))
 
-    log.info(f"Target queue built: {len(queue)} questions across {len(set(queue))} unique buckets.")
+    log.info(f"Queue built: {len(queue)} questions across {len(set(queue))} unique buckets.")
     return queue
 
 # ─────────────────────────────────────────────────────────────
-# GEMINI GENERATION
+# PROMPT BUILDER
 # ─────────────────────────────────────────────────────────────
-def generate_question(ai: genai.Client, module: str, domain: str, difficulty: str, is_spr: bool) -> Optional[dict]:
+def build_prompt(module: str, domain: str, difficulty: str, is_spr: bool) -> str:
+    domain_display = domain.replace("_", " ")
+    module_display = "Math" if module == "Math" else "Reading & Writing"
+    spr_note = (
+        "This is a Student-Produced Response (SPR / grid-in). NO multiple-choice options. "
+        "Set is_spr=true and options=null. The student writes a numeric answer."
+    ) if is_spr else (
+        "This has 4 multiple-choice options (A, B, C, D). Set is_spr=false. "
+        "Provide exactly 4 distinct, plausible options."
+    )
+
+    return f"""You are a Digital SAT question writer and copyright-sanitization engine.
+
+Generate ONE brand-new Digital SAT question with EXACTLY these attributes:
+  Section   : {module_display}
+  Domain    : {domain_display}
+  Difficulty: {difficulty}
+  {spr_note}
+
+RULES:
+1. Use completely fictional names, places, companies, scenarios — no real SAT question text.
+2. Keep all math/logic/grammar mechanics identical to real College Board style.
+3. Difficulty must match: Easy=single-step, Medium=2-3 steps, Hard=multi-concept or trap.
+4. For RW questions, include a short passage (2-4 sentences) in question_text before the question.
+
+Respond with ONLY a valid JSON object — no markdown, no extra text:
+{{
+  "module": "{module}",
+  "domain": "{domain}",
+  "difficulty": "{difficulty}",
+  "is_spr": {str(is_spr).lower()},
+  "question_text": "<full question text>",
+  "options": {("null" if is_spr else '["<option A>", "<option B>", "<option C>", "<option D>"]')},
+  "correct_answer": "<exact correct option text OR numeric value for SPR>",
+  "rationale": "<1-2 sentence explanation>"
+}}"""
+
+# ─────────────────────────────────────────────────────────────
+# GROQ GENERATION  
+# ─────────────────────────────────────────────────────────────
+def generate_question(client: Groq, module: str, domain: str, difficulty: str, is_spr: bool) -> Optional[dict]:
     prompt = build_prompt(module, domain, difficulty, is_spr)
-    # Model priority: use correct names for google-genai SDK
-    # gemini-2.0-flash-lite has separate quota from gemini-2.0-flash
-    models_to_try = ["gemini-2.0-flash-lite", "gemini-2.0-flash", "gemini-1.5-flash-latest"]
-    for model in models_to_try:
-        for attempt in range(3):  # up to 3 retries per model
-            try:
-                response = ai.models.generate_content(
-                    model=model,
-                    contents=prompt,
-                    config={"response_mime_type": "application/json"},
-                )
-                raw = response.text.strip()
-                if raw.startswith("```"):
-                    raw = raw.split("```")[1]
-                    if raw.startswith("json"):
-                        raw = raw[4:]
-                data = json.loads(raw)
-                return data
-            except json.JSONDecodeError as je:
-                log.error(f"JSON parse error ({model}): {je} | Raw: {response.text[:200]}")
-                return None  # Bad JSON isn't a quota issue; don't retry
-            except Exception as e:
-                err_str = str(e)
-                if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
-                    backoff = 30 * (2 ** attempt)  # 30s, 60s, 120s
-                    log.warning(f"Rate limit on {model} (attempt {attempt+1}). Backing off {backoff}s…")
-                    time.sleep(backoff)
-                else:
-                    log.error(f"Gemini error ({model}): {e}")
-                    break  # Non-quota error; try next model
-        else:
-            log.warning(f"Model {model} exhausted after 3 attempts; trying next model.")
-            continue
-        break  # Reached here means a non-429 error; exit model loop
-    log.error("All models exhausted. Skipping this question.")
+    for attempt in range(3):
+        try:
+            response = client.chat.completions.create(
+                model=MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
+                temperature=0.8,
+                max_tokens=1024,
+            )
+            raw = response.choices[0].message.content.strip()
+            return json.loads(raw)
+        except json.JSONDecodeError as e:
+            log.error(f"JSON parse error (attempt {attempt+1}): {e}")
+            return None
+        except Exception as e:
+            err = str(e)
+            if "rate_limit" in err.lower() or "429" in err:
+                wait = 10 * (2 ** attempt)  # 10s, 20s, 40s
+                log.warning(f"Rate limit hit (attempt {attempt+1}). Waiting {wait}s…")
+                time.sleep(wait)
+            else:
+                log.error(f"Groq error: {e}")
+                return None
+    log.error("All retries exhausted.")
     return None
 
 # ─────────────────────────────────────────────────────────────
 # VALIDATION
 # ─────────────────────────────────────────────────────────────
-VALID_MODULES  = {"Math", "Reading_Writing"}
-VALID_DOMAINS  = {
+VALID_MODULES = {"Math", "Reading_Writing"}
+VALID_DOMAINS = {
     "Heart_of_Algebra", "Advanced_Math", "Problem_Solving_Data", "Geometry_Trigonometry",
     "Information_and_Ideas", "Craft_and_Structure", "Expression_of_Ideas", "Standard_English_Conventions",
 }
 VALID_DIFFS = {"Easy", "Medium", "Hard"}
 
-def validate(data: dict, expected_module: str, expected_domain: str, expected_diff: str, expected_spr: bool) -> Optional[dict]:
-    if not isinstance(data, dict):
-        return None
-    if data.get("module") not in VALID_MODULES:
-        data["module"] = expected_module
-    if data.get("domain") not in VALID_DOMAINS:
-        data["domain"] = expected_domain
-    if data.get("difficulty") not in VALID_DIFFS:
-        data["difficulty"] = expected_diff
-    if not data.get("question_text"):
-        return None
-    if not data.get("correct_answer"):
-        return None
-    # Enforce is_spr consistency
-    is_spr = bool(data.get("is_spr", expected_spr))
+def validate(data: dict, exp_module: str, exp_domain: str, exp_diff: str, exp_spr: bool) -> Optional[dict]:
+    if not isinstance(data, dict): return None
+    # Pin to expected values if Groq drifts
+    data["module"]     = data.get("module")     if data.get("module")     in VALID_MODULES else exp_module
+    data["domain"]     = data.get("domain")     if data.get("domain")     in VALID_DOMAINS else exp_domain
+    data["difficulty"] = data.get("difficulty") if data.get("difficulty") in VALID_DIFFS   else exp_diff
+    if not data.get("question_text") or not data.get("correct_answer"): return None
+    is_spr = bool(data.get("is_spr", exp_spr))
     data["is_spr"] = is_spr
     if is_spr:
         data["options"] = None
     else:
         opts = data.get("options")
         if not isinstance(opts, list) or len(opts) != 4:
-            log.warning("Options malformed; skipping.")
+            log.warning("Options malformed — skipping.")
             return None
     data["source_method"] = "Automated_Pipeline"
-    # Remove any stray id field Gemini may hallucinate
     data.pop("id", None)
     return data
 
@@ -247,45 +217,39 @@ def validate(data: dict, expected_module: str, expected_domain: str, expected_di
 # MAIN
 # ─────────────────────────────────────────────────────────────
 def main():
-    log.info("=== SAT Harvester v2 starting ===")
+    log.info("=== SAT Harvester v3 (Groq) starting ===")
 
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-    ai = genai.Client(api_key=GEMINI_API_KEY)
+    groq_client = Groq(api_key=GROQ_API_KEY)
 
     queue = build_target_queue(supabase)
-    log.info(f"Processing {len(queue)} questions this run...")
+    log.info(f"Processing {len(queue)} questions…")
 
     inserted = 0
     skipped  = 0
 
     for i, (module, domain, difficulty, is_spr) in enumerate(queue):
-        log.info(f"[{i+1}/{len(queue)}] Generating: {module} | {domain} | {difficulty} | SPR={is_spr}")
-        
-        data = generate_question(ai, module, domain, difficulty, is_spr)
-        
-        if data:
-            validated = validate(data, module, domain, difficulty, is_spr)
-        else:
-            validated = None
+        log.info(f"[{i+1}/{len(queue)}] {module} | {domain} | {difficulty} | SPR={is_spr}")
+
+        data = generate_question(groq_client, module, domain, difficulty, is_spr)
+        validated = validate(data, module, domain, difficulty, is_spr) if data else None
 
         if validated:
             try:
                 supabase.table("sat_question_bank").insert(validated).execute()
-                log.info(f"  ✓ Inserted: {validated['question_text'][:60]}…")
+                log.info(f"  ✓ Inserted: {validated['question_text'][:70]}…")
                 inserted += 1
             except Exception as e:
                 log.error(f"  ✗ Insert failed: {e}")
                 skipped += 1
         else:
-            log.warning(f"  ✗ Validation failed; skipping.")
+            log.warning(f"  ✗ Skipped (validation failed or Groq error).")
             skipped += 1
 
-        # ── Anti-rate-limit delay: 1.5–4.0 s between calls ──────
-        delay = random.uniform(1.5, 4.0)
-        log.debug(f"  Sleeping {delay:.2f}s…")
-        time.sleep(delay)
+        # Groq free tier: ~30 RPM — 2s delay keeps us safe at 25q/run
+        time.sleep(random.uniform(2.0, 3.5))
 
-    log.info(f"=== Run complete: {inserted} inserted, {skipped} skipped ===")
+    log.info(f"=== Done: {inserted} inserted, {skipped} skipped ===")
 
 
 if __name__ == "__main__":
