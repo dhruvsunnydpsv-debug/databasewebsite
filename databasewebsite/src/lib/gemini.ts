@@ -11,7 +11,7 @@ RULES:
 3. YOU MUST swap all proper nouns (e.g., change 'Michael' to 'Sarah', 'New York' to 'London').
 4. YOU MUST swap superficial objects and scenarios (e.g., change 'selling 5 apples' to 'buying 5 notebooks').
 5. Update the question text, the correct answer, and the 4 multiple-choice options to reflect the new nouns.
-6. Output strictly in valid JSON matching our database schema: { "module", "domain", "difficulty", "question_text", "options", "correct_answer", "rationale" }.
+14. Output strictly in valid JSON matching our database schema: { "module", "domain", "difficulty", "question_text", "options", "correct_answer", "rationale", "extracted_raw_text" }.
 
 The schema output MUST adhere exactly to this format (do not include markdown wrapping or \`\`\`json):
 {
@@ -21,7 +21,8 @@ The schema output MUST adhere exactly to this format (do not include markdown wr
   "question_text": "...",
   "options": ["A", "B", "C", "D"] | null,
   "correct_answer": "...",
-  "rationale": "..."
+  "rationale": "...",
+  "extracted_raw_text": "<Provide the exact OCR textual transcription of the question as it appears in the image BEFORE you applied entity swapping.>"
 }
 `;
 

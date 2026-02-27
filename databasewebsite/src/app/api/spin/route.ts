@@ -18,9 +18,14 @@ export async function POST(req: Request) {
         // 1. Send image to Gemini API
         const generatedQuestion = await generateSyntheticQuestion(base64Image, file.type);
 
+        // Isolate the raw extracted OCR text before passing to DB
+        const raw_text = generatedQuestion.extracted_raw_text || null;
+        delete generatedQuestion.extracted_raw_text;
+
         // 2. Format data for Supabase
         const dbPayload = {
             ...generatedQuestion,
+            raw_original_text: raw_text,
             source_method: 'Admin_Dropzone'
         };
 

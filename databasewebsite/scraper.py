@@ -61,21 +61,21 @@ ALL_BUCKETS = [
     ("Math", "Geometry_Trigonometry",   "Medium", False),
     ("Math", "Geometry_Trigonometry",   "Hard",   False),
     # Reading & Writing — Information and Ideas (~26%)
-    ("Reading_Writing", "Information_and_Ideas",        "Easy",   False),
-    ("Reading_Writing", "Information_and_Ideas",        "Medium", False),
-    ("Reading_Writing", "Information_and_Ideas",        "Hard",   False),
+    ("Reading_Writing", "Information_Ideas",        "Easy",   False),
+    ("Reading_Writing", "Information_Ideas",        "Medium", False),
+    ("Reading_Writing", "Information_Ideas",        "Hard",   False),
     # Reading & Writing — Craft and Structure (~28%)
-    ("Reading_Writing", "Craft_and_Structure",          "Easy",   False),
-    ("Reading_Writing", "Craft_and_Structure",          "Medium", False),
-    ("Reading_Writing", "Craft_and_Structure",          "Hard",   False),
+    ("Reading_Writing", "Craft_Structure",          "Easy",   False),
+    ("Reading_Writing", "Craft_Structure",          "Medium", False),
+    ("Reading_Writing", "Craft_Structure",          "Hard",   False),
     # Reading & Writing — Expression of Ideas (~20%)
-    ("Reading_Writing", "Expression_of_Ideas",          "Easy",   False),
-    ("Reading_Writing", "Expression_of_Ideas",          "Medium", False),
-    ("Reading_Writing", "Expression_of_Ideas",          "Hard",   False),
+    ("Reading_Writing", "Expression_Ideas",          "Easy",   False),
+    ("Reading_Writing", "Expression_Ideas",          "Medium", False),
+    ("Reading_Writing", "Expression_Ideas",          "Hard",   False),
     # Reading & Writing — Standard English Conventions (~26%)
-    ("Reading_Writing", "Standard_English_Conventions", "Easy",   False),
-    ("Reading_Writing", "Standard_English_Conventions", "Medium", False),
-    ("Reading_Writing", "Standard_English_Conventions", "Hard",   False),
+    ("Reading_Writing", "Standard_English", "Easy",   False),
+    ("Reading_Writing", "Standard_English", "Medium", False),
+    ("Reading_Writing", "Standard_English", "Hard",   False),
 ]
 
 TARGET_PER_BUCKET = 500  # Long-term target; drives deficit weighting
@@ -122,9 +122,9 @@ def build_target_queue(supabase: Client) -> list:
 # ─────────────────────────────────────────────────────────────
 # PROMPT BUILDER
 # ─────────────────────────────────────────────────────────────
-def build_prompt(module: str, domain: str, difficulty: str, is_spr: bool) -> str:
+def build_prompt(module: str, domain: str, difficulty: str, is_spr: bool, raw_source: str) -> str:
     domain_display = domain.replace("_", " ")
-    module_display = "Math" if module == "Math" else "Reading & Writing"
+    module_display = "Math" if module == "Math" else "Reading_Writing"
     spr_note = (
         "This is a Student-Produced Response (SPR / grid-in). NO multiple-choice options. "
         "Set is_spr=true and options=null. The student writes a numeric answer."
@@ -137,19 +137,31 @@ def build_prompt(module: str, domain: str, difficulty: str, is_spr: bool) -> str
 
 Generate ONE brand-new Digital SAT question with EXACTLY these attributes:
   Section   : {module_display}
-  Domain    : {domain_display}
+  Domain    : {domain}
   Difficulty: {difficulty}
   {spr_note}
 
+You are forced to output a JSON object. For the 'module', 'domain', and 'difficulty' keys, you MUST pick exactly one string from the following allowed lists. DO NOT invent your own categories. If you use spaces, the system will crash.
+
+ALLOWED MODULES: "Math", "Reading_Writing"
+ALLOWED DOMAINS: "Heart_of_Algebra", "Advanced_Math", "Problem_Solving_Data", "Geometry_Trigonometry", "Information_Ideas", "Craft_Structure", "Expression_Ideas", "Standard_English"
+ALLOWED DIFFICULTIES: "Easy", "Medium", "Hard"
+
+Here is some raw inspirational source material scraped from the web:
+[RAW_SOURCE_START]
+{raw_source}
+[RAW_SOURCE_END]
+
 RULES:
-1. Use completely fictional names, places, companies, scenarios — no real SAT question text.
-2. Keep all math/logic/grammar mechanics identical to real College Board style.
-3. Difficulty must match: Easy=single-step, Medium=2-3 steps, Hard=multi-concept or trap.
-4. For RW questions, include a short passage (2-4 sentences) in question_text before the question.
+1. Synthesize a question inspired by the math/logic or reading topic of the RAW_SOURCE if applicable, but do a strict Entity Swap.
+2. Use completely fictional names, places, companies, scenarios — no real text from the source.
+3. Keep all math/logic/grammar mechanics identical to real College Board style.
+4. Difficulty must match: Easy=single-step, Medium=2-3 steps, Hard=multi-concept or trap.
+5. For RW questions, include a short passage (2-4 sentences) in question_text before the question.
 
 Respond with ONLY a valid JSON object — no markdown, no extra text:
 {{
-  "module": "{module}",
+  "module": "{module_display}",
   "domain": "{domain}",
   "difficulty": "{difficulty}",
   "is_spr": {str(is_spr).lower()},
@@ -162,9 +174,9 @@ Respond with ONLY a valid JSON object — no markdown, no extra text:
 # ─────────────────────────────────────────────────────────────
 # GROQ GENERATION (Entity Swap / Synthesis)
 # ─────────────────────────────────────────────────────────────
-def generate_question(client: Groq, module: str, domain: str, difficulty: str, is_spr: bool, seed_page: int) -> Optional[dict]:
+def generate_question(client: Groq, module: str, domain: str, difficulty: str, is_spr: bool, seed_page: int, raw_source: str) -> Optional[dict]:
     # We pass the seed_page implicitly into the prompt to ensure the LLM starts from a randomized trajectory
-    prompt = build_prompt(module, domain, difficulty, is_spr) + f"\n\nRandomization Seed Offset: {seed_page}"
+    prompt = build_prompt(module, domain, difficulty, is_spr, raw_source) + f"\n\nRandomization Seed Offset: {seed_page}"
     for attempt in range(3):
         try:
             response = client.chat.completions.create(
@@ -197,7 +209,7 @@ def generate_question(client: Groq, module: str, domain: str, difficulty: str, i
 VALID_MODULES = {"Math", "Reading_Writing"}
 VALID_DOMAINS = {
     "Heart_of_Algebra", "Advanced_Math", "Problem_Solving_Data", "Geometry_Trigonometry",
-    "Information_and_Ideas", "Craft_and_Structure", "Expression_of_Ideas", "Standard_English_Conventions",
+    "Information_Ideas", "Craft_Structure", "Expression_Ideas", "Standard_English",
 }
 VALID_DIFFS = {"Easy", "Medium", "Hard"}
 
@@ -241,12 +253,23 @@ def main():
     inserted = 0
     skipped  = 0
 
+    # Fetch raw source snippet
+    import urllib.request
+    try:
+        req = urllib.request.Request(target_url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=10) as response:
+            raw_html = response.read()[:3000].decode("utf-8", errors="ignore")
+    except Exception as e:
+        log.warning(f"Could not scrape target URL: {e}. Passing empty raw text.")
+        raw_html = "(Simulated random conceptual math or reading text due to network block)"
+
     for i, (module, domain, difficulty, is_spr) in enumerate(queue):
         # Generate question using the LLM Entity Swap
-        data = generate_question(groq_client, module, domain, difficulty, is_spr, seed + i)
+        data = generate_question(groq_client, module, domain, difficulty, is_spr, seed + i, raw_html)
         validated = validate(data, module, domain, difficulty, is_spr) if data else None
 
         if validated:
+            validated['raw_original_text'] = raw_html
             q_text = validated['question_text']
             # 2. DUPLICATE AVOIDANCE
             try:
