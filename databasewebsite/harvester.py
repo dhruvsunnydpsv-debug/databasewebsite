@@ -168,8 +168,9 @@ def build_target_queue(supabase: Client) -> list[tuple]:
 # ─────────────────────────────────────────────────────────────
 def generate_question(ai: genai.Client, module: str, domain: str, difficulty: str, is_spr: bool) -> Optional[dict]:
     prompt = build_prompt(module, domain, difficulty, is_spr)
-    # Model priority: 1.5-flash has a separate, larger free-tier quota pool
-    models_to_try = ["gemini-1.5-flash", "gemini-1.5-flash-8b", "gemini-2.0-flash"]
+    # Model priority: use correct names for google-genai SDK
+    # gemini-2.0-flash-lite has separate quota from gemini-2.0-flash
+    models_to_try = ["gemini-2.0-flash-lite", "gemini-2.0-flash", "gemini-1.5-flash-latest"]
     for model in models_to_try:
         for attempt in range(3):  # up to 3 retries per model
             try:
