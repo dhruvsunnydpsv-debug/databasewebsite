@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { generateSyntheticQuestion } from '../../../lib/gemini';
+import { generateSyntheticQuestion } from '../../../lib/groq';
 import { supabase } from '../../../lib/supabase';
 
 export async function POST(req: Request) {
@@ -15,12 +15,15 @@ export async function POST(req: Request) {
         const buffer = Buffer.from(arrayBuffer);
         const base64Image = buffer.toString('base64');
 
-        // 1. Send image to Gemini API
+        // 1. Send image to Groq API for Entity Swap + OCR
         const generatedQuestion = await generateSyntheticQuestion(base64Image, file.type);
 
         // Isolate the raw extracted OCR text before passing to DB
-        const raw_text = generatedQuestion.extracted_raw_text || null;
-        delete generatedQuestion.extracted_raw_text;
+        const raw_text = generatedQuestion.raw_original_text || null;
+        delete generatedQuestion.raw_original_text;
+
+        // Remove rationale before DB insert (not a DB column)
+        delete generatedQuestion.rationale;
 
         // 2. Format data for Supabase
         const dbPayload = {
