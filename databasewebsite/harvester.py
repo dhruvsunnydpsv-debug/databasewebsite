@@ -1,133 +1,276 @@
+"""
+scraper.py — SAT Automated Harvester v2
+=======================================
+Runs every 15 minutes via GitHub Actions.
+Per run:
+  1. Queries Supabase view_inventory to find under-represented domain/difficulty buckets.
+  2. Builds a TARGET QUEUE of ~100 questions, weighted toward the thinnest buckets.
+  3. Generates questions using Gemini API (no raw scraping needed — Gemini synthesizes
+     College-Board-style questions directly for each bucket).
+  4. Issues entity-swap + categorization in one combined prompt.
+  5. Inserts validated records into sat_question_bank.
+
+Anti-ban / rate-limit controls:
+  - Random delay between Gemini calls (1.5–4.0 s).
+  - Gemini API has per-minute quota; we respect it with delays.
+  - Each call generates 1 question → 100 calls / run.
+"""
+
 import os
 import json
 import logging
+import random
+import time
+from typing import Optional
 from supabase import create_client, Client
 from google import genai
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# ─────────────────────────────────────────────────────────────
+# CONFIG
+# ─────────────────────────────────────────────────────────────
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+log = logging.getLogger(__name__)
 
-# --- CONFIGURATION ---
-SUPABASE_URL = os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("NEXT_PUBLIC_SUPABASE_ANON_KEY")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+SUPABASE_URL = os.environ["NEXT_PUBLIC_SUPABASE_URL"]
+SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ["NEXT_PUBLIC_SUPABASE_ANON_KEY"]
+GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 
-if not SUPABASE_URL or not SUPABASE_KEY or not GEMINI_API_KEY:
-    logging.warning("Missing required environment variables. Ensure SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, and GEMINI_API_KEY are set.")
+QUESTIONS_PER_RUN = 100
 
-# Initialize clients
-try:
-    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-    ai = genai.Client(api_key=GEMINI_API_KEY)
-except Exception as e:
-    logging.error(f"Failed to initialize clients: {e}")
+# ── Domain meta ──────────────────────────────────────────────
+ALL_BUCKETS = [
+    # (module, domain, difficulty, is_spr_possible, target_ratio)
+    # Math — 70% of run → 70 q
+    ("Math", "Heart_of_Algebra",        "Easy",   False, 0.044),
+    ("Math", "Heart_of_Algebra",        "Medium", False, 0.062),
+    ("Math", "Heart_of_Algebra",        "Hard",   False, 0.044),
+    ("Math", "Heart_of_Algebra",        "Hard",   True,  0.018),  # SPR Hard
+    ("Math", "Advanced_Math",           "Easy",   False, 0.044),
+    ("Math", "Advanced_Math",           "Medium", False, 0.062),
+    ("Math", "Advanced_Math",           "Hard",   False, 0.044),
+    ("Math", "Advanced_Math",           "Hard",   True,  0.018),  # SPR Hard
+    ("Math", "Problem_Solving_Data",    "Easy",   False, 0.025),
+    ("Math", "Problem_Solving_Data",    "Medium", False, 0.038),
+    ("Math", "Problem_Solving_Data",    "Hard",   False, 0.025),
+    ("Math", "Geometry_Trigonometry",   "Easy",   False, 0.025),
+    ("Math", "Geometry_Trigonometry",   "Medium", False, 0.038),
+    ("Math", "Geometry_Trigonometry",   "Hard",   False, 0.025),
+    # RW — 30% of run → 30 q
+    ("Reading_Writing", "Information_and_Ideas",         "Easy",   False, 0.025),
+    ("Reading_Writing", "Information_and_Ideas",         "Medium", False, 0.038),
+    ("Reading_Writing", "Information_and_Ideas",         "Hard",   False, 0.025),
+    ("Reading_Writing", "Craft_and_Structure",           "Easy",   False, 0.025),
+    ("Reading_Writing", "Craft_and_Structure",           "Medium", False, 0.038),
+    ("Reading_Writing", "Craft_and_Structure",           "Hard",   False, 0.025),
+    ("Reading_Writing", "Expression_of_Ideas",           "Easy",   False, 0.019),
+    ("Reading_Writing", "Expression_of_Ideas",           "Medium", False, 0.025),
+    ("Reading_Writing", "Expression_of_Ideas",           "Hard",   False, 0.019),
+    ("Reading_Writing", "Standard_English_Conventions",  "Easy",   False, 0.019),
+    ("Reading_Writing", "Standard_English_Conventions",  "Medium", False, 0.025),
+    ("Reading_Writing", "Standard_English_Conventions",  "Hard",   False, 0.019),
+]
 
-SYSTEM_PROMPT = """
-You are an elite, high-precision data parser for a Digital SAT database. I will provide a source SAT question. Your strictly enforced job is 'Entity Swapping'. You will leave the 'Engine' of the question untouched and only change the 'Paint'.
+# ─────────────────────────────────────────────────────────────
+# COMBINED CATEGORIZATION + ENTITY SWAP PROMPT
+# ─────────────────────────────────────────────────────────────
+def build_prompt(module: str, domain: str, difficulty: str, is_spr: bool) -> str:
+    domain_display = domain.replace("_", " ")
+    module_display = "Math" if module == "Math" else "Reading & Writing"
+    spr_note = (
+        "This question is a Student-Produced Response (SPR / grid-in). "
+        "There are NO multiple-choice options. The student must calculate and enter the answer. "
+        "Set is_spr=true and options=null."
+    ) if is_spr else (
+        "This question has 4 multiple-choice options (A, B, C, D). "
+        "Set is_spr=false and provide exactly 4 distinct options."
+    )
 
-RULES:
-1. DO NOT change a single number, mathematical operator, variable ($x$, $y$), or equation.
-2. DO NOT alter the core grammatical structure, sentence length, or punctuation logic.
-3. YOU MUST swap all proper nouns (e.g., change 'Michael' to 'Sarah', 'New York' to 'London').
-4. YOU MUST swap superficial objects and scenarios (e.g., change 'selling 5 apples' to 'buying 5 notebooks').
-5. Update the question text, the correct answer, and the 4 multiple-choice options to reflect the new nouns.
-6. Output strictly in valid JSON matching our database schema: { "module", "domain", "difficulty", "question_text", "options", "correct_answer", "rationale" }.
+    return f"""You are an elite Digital SAT question architect and copyright-sanitization engine.
 
-The schema output MUST adhere exactly to this format (do not include markdown wrapping or ```json):
-{
-  "module": "Math" | "Reading_Writing",
-  "domain": "Heart_of_Algebra" | "Advanced_Math" | "Problem_Solving_Data" | "Geometry_Trigonometry" | "Information_and_Ideas" | "Craft_and_Structure" | "Expression_of_Ideas" | "Standard_English_Conventions",
-  "difficulty": "Easy" | "Medium" | "Hard",
-  "question_text": "...",
-  "options": ["A", "B", "C", "D"] | null,
-  "correct_answer": "...",
-  "rationale": "..."
-}
-"""
+TASK:
+Generate one brand-new Digital SAT question with these EXACT attributes:
+  - Section  : {module_display}
+  - Domain   : {domain_display}
+  - Difficulty: {difficulty}
+  - {spr_note}
 
-def get_target_domain() -> str:
+ENTITY SWAP RULES (mandatory):
+1. Use entirely fictional names, places, companies, and scenarios.
+2. Do NOT copy any question, sentence, or passage verbatim from any real SAT exam.
+3. Preserve all mathematical logic, equation structures, and grammar conventions exactly as the College Board would.
+4. The difficulty MUST match {difficulty}: Easy = single-step, Medium = 2-3 steps, Hard = multi-concept or trap answers.
+
+OUTPUT FORMAT — respond with ONLY a JSON object, no markdown, no extra text:
+{{
+  "module": "{module}",
+  "domain": "{domain}",
+  "difficulty": "{difficulty}",
+  "is_spr": {str(is_spr).lower()},
+  "question_text": "<full question text, including any passage for RW>",
+  "options": {("null" if is_spr else '["<option A>", "<option B>", "<option C>", "<option D>"]')},
+  "correct_answer": "<exact text of correct option OR exact numeric value for SPR>",
+  "rationale": "<1–2 sentence explanation of why the answer is correct>"
+}}"""
+
+# ─────────────────────────────────────────────────────────────
+# TARGET QUEUE BUILDER (self-balancing)
+# ─────────────────────────────────────────────────────────────
+def build_target_queue(supabase: Client) -> list[tuple]:
     """
-    Query Supabase to check inventory and determine which domain needs questions most.
-    This is the 'Self-Balancing Logic'.
+    Queries view_inventory to determine which buckets are thinnest.
+    Returns a list of (module, domain, difficulty, is_spr) tuples totalling ~QUESTIONS_PER_RUN.
+    Thinner buckets receive proportionally more weight.
     """
-    logging.info("Analyzing inventory for self-balancing logic...")
-    DOMAINS = [
-        "Heart_of_Algebra", "Advanced_Math", "Problem_Solving_Data", "Geometry_Trigonometry",
-        "Information_and_Ideas", "Craft_and_Structure", "Expression_of_Ideas", "Standard_English_Conventions"
-    ]
+    log.info("Querying view_inventory for self-balancing analysis...")
     
-    domain_counts = {domain: 0 for domain in DOMAINS}
-    
+    # Fetch current counts
+    existing: dict[tuple, int] = {}
     try:
-        response = supabase.table("sat_question_bank").select("domain").execute()
-        for row in response.data:
-            domain = row.get("domain")
-            if domain in domain_counts:
-                domain_counts[domain] += 1
-                
-        # Find the domain with the minimum count
-        target_domain = min(domain_counts, key=domain_counts.get)
-        logging.info(f"Inventory status: {domain_counts}")
-        logging.info(f"Targeting domain: {target_domain} (Count: {domain_counts[target_domain]})")
-        return target_domain
+        rows = supabase.table("sat_question_bank").select("module, domain, difficulty, is_spr").execute()
+        for r in rows.data:
+            key = (r["module"], r["domain"], r["difficulty"], r.get("is_spr", False))
+            existing[key] = existing.get(key, 0) + 1
     except Exception as e:
-        logging.error(f"Error querying inventory: {e}")
-        return DOMAINS[0] # Fallback to first domain
+        log.warning(f"Could not read inventory (table might be empty): {e}")
 
+    # Compute deficit score for each bucket
+    # deficit = max(0, expected_count - actual_count) + 1
+    # Higher deficit → more questions this run
+    TARGET_TOTAL = 500  # long-term target per bucket
+    scores = []
+    for bucket in ALL_BUCKETS:
+        module, domain, difficulty, is_spr, _ = bucket
+        key = (module, domain, difficulty, is_spr)
+        actual = existing.get(key, 0)
+        deficit = max(0, TARGET_TOTAL - actual) + 1
+        scores.append((module, domain, difficulty, is_spr, deficit))
+        log.info(f"  {module} | {domain} | {difficulty} | SPR={is_spr} → {actual} questions (deficit {deficit})")
 
-def harvest_raw_question(target_domain: str) -> str:
-    """
-    Simulate pinging an open-source API or scraping raw HTML for the targeted domain.
-    """
-    logging.info(f"Harvesting raw questions for domain: {target_domain}...")
-    
-    # Mocking a harvested question based on domain
-    if target_domain in ["Heart_of_Algebra", "Advanced_Math", "Problem_Solving_Data", "Geometry_Trigonometry"]:
-        return "John buys 4 apples for $12. How much does 1 apple cost?"
-    else:
-        return "The pack of wolves, which hunts at night, is aggressive."
+    # Normalize deficits into slot allocations summing to QUESTIONS_PER_RUN
+    total_deficit = sum(s[4] for s in scores)
+    queue: list[tuple] = []
+    for module, domain, difficulty, is_spr, deficit in scores:
+        slots = max(1, round((deficit / total_deficit) * QUESTIONS_PER_RUN))
+        for _ in range(slots):
+            queue.append((module, domain, difficulty, is_spr))
 
+    # Trim or pad to exact QUESTIONS_PER_RUN
+    random.shuffle(queue)
+    queue = queue[:QUESTIONS_PER_RUN]
+    while len(queue) < QUESTIONS_PER_RUN:
+        queue.append(random.choice(queue))
 
-def perform_entity_swap(raw_question: str) -> dict:
-    """
-    Send the raw text to Gemini API for 'Entity Swapping'
-    """
-    logging.info("Sending to Gemini 1.5 Flash for Entity Swapping...")
-    
+    log.info(f"Target queue built: {len(queue)} questions across {len(set(queue))} unique buckets.")
+    return queue
+
+# ─────────────────────────────────────────────────────────────
+# GEMINI GENERATION
+# ─────────────────────────────────────────────────────────────
+def generate_question(ai: genai.Client, module: str, domain: str, difficulty: str, is_spr: bool) -> Optional[dict]:
+    prompt = build_prompt(module, domain, difficulty, is_spr)
     try:
         response = ai.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=[SYSTEM_PROMPT, raw_question],
-            config={
-                'response_mime_type': 'application/json'
-            }
+            model="gemini-2.0-flash",
+            contents=prompt,
+            config={"response_mime_type": "application/json"},
         )
-        data = json.loads(response.text)
+        raw = response.text.strip()
+        # Strip markdown fences if Gemini wraps in ```json
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        data = json.loads(raw)
         return data
+    except json.JSONDecodeError as je:
+        log.error(f"JSON parse error: {je} | Raw: {response.text[:200]}")
+        return None
     except Exception as e:
-        logging.error(f"Error during generative entity swap: {e}")
+        log.error(f"Gemini error: {e}")
         return None
 
+# ─────────────────────────────────────────────────────────────
+# VALIDATION
+# ─────────────────────────────────────────────────────────────
+VALID_MODULES  = {"Math", "Reading_Writing"}
+VALID_DOMAINS  = {
+    "Heart_of_Algebra", "Advanced_Math", "Problem_Solving_Data", "Geometry_Trigonometry",
+    "Information_and_Ideas", "Craft_and_Structure", "Expression_of_Ideas", "Standard_English_Conventions",
+}
+VALID_DIFFS = {"Easy", "Medium", "Hard"}
+
+def validate(data: dict, expected_module: str, expected_domain: str, expected_diff: str, expected_spr: bool) -> Optional[dict]:
+    if not isinstance(data, dict):
+        return None
+    if data.get("module") not in VALID_MODULES:
+        data["module"] = expected_module
+    if data.get("domain") not in VALID_DOMAINS:
+        data["domain"] = expected_domain
+    if data.get("difficulty") not in VALID_DIFFS:
+        data["difficulty"] = expected_diff
+    if not data.get("question_text"):
+        return None
+    if not data.get("correct_answer"):
+        return None
+    # Enforce is_spr consistency
+    is_spr = bool(data.get("is_spr", expected_spr))
+    data["is_spr"] = is_spr
+    if is_spr:
+        data["options"] = None
+    else:
+        opts = data.get("options")
+        if not isinstance(opts, list) or len(opts) != 4:
+            log.warning("Options malformed; skipping.")
+            return None
+    data["source_method"] = "Automated_Pipeline"
+    # Remove any stray id field Gemini may hallucinate
+    data.pop("id", None)
+    return data
+
+# ─────────────────────────────────────────────────────────────
+# MAIN
+# ─────────────────────────────────────────────────────────────
 def main():
-    if not SUPABASE_URL or not SUPABASE_KEY or not GEMINI_API_KEY:
-        return
+    log.info("=== SAT Harvester v2 starting ===")
+
+    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    ai = genai.Client(api_key=GEMINI_API_KEY)
+
+    queue = build_target_queue(supabase)
+    log.info(f"Processing {len(queue)} questions this run...")
+
+    inserted = 0
+    skipped  = 0
+
+    for i, (module, domain, difficulty, is_spr) in enumerate(queue):
+        log.info(f"[{i+1}/{len(queue)}] Generating: {module} | {domain} | {difficulty} | SPR={is_spr}")
         
-    target_domain = get_target_domain()
-    raw_question = harvest_raw_question(target_domain)
-    
-    swapped_data = perform_entity_swap(raw_question)
-    
-    if swapped_data:
-        logging.info(f"Successfully swapped entity. Parsed JSON: {swapped_data.get('question_text')[:50]}...")
+        data = generate_question(ai, module, domain, difficulty, is_spr)
         
-        # Add source method
-        swapped_data['source_method'] = 'Automated_Pipeline'
-        
-        # Insert into Supabase
-        try:
-            response = supabase.table("sat_question_bank").insert(swapped_data).execute()
-            logging.info("Successfully inserted into Supabase!")
-        except Exception as e:
-            logging.error(f"Failed to insert into Supabase: {e}")
-            
+        if data:
+            validated = validate(data, module, domain, difficulty, is_spr)
+        else:
+            validated = None
+
+        if validated:
+            try:
+                supabase.table("sat_question_bank").insert(validated).execute()
+                log.info(f"  ✓ Inserted: {validated['question_text'][:60]}…")
+                inserted += 1
+            except Exception as e:
+                log.error(f"  ✗ Insert failed: {e}")
+                skipped += 1
+        else:
+            log.warning(f"  ✗ Validation failed; skipping.")
+            skipped += 1
+
+        # ── Anti-rate-limit delay: 1.5–4.0 s between calls ──────
+        delay = random.uniform(1.5, 4.0)
+        log.debug(f"  Sleeping {delay:.2f}s…")
+        time.sleep(delay)
+
+    log.info(f"=== Run complete: {inserted} inserted, {skipped} skipped ===")
+
+
 if __name__ == "__main__":
     main()

@@ -1,0 +1,53 @@
+name: SAT Harvester — Auto Ingest
+
+on:
+  schedule:
+    # Every 15 minutes, 24/7
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+    # Allow manual trigger from GitHub Actions UI
+    inputs:
+      dry_run:
+        description: 'Dry run (no insert)'
+        required: false
+        default: 'false'
+
+jobs:
+  harvest:
+    name: Harvest & Ingest SAT Questions
+    runs-on: ubuntu-latest
+    timeout-minutes: 12  # Fail-safe: kill if stuck (100q × 4s max ≈ 400s; 12 min is safe ceiling)
+
+    steps:
+      # ── 1. Checkout repo ─────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── 2. Set up Python ─────────────────────────────────────
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      # ── 3. Install dependencies ───────────────────────────────
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install supabase google-genai requests beautifulsoup4 lxml
+
+      # ── 4. Run harvester ─────────────────────────────────────
+      - name: Run SAT Harvester
+        env:
+          NEXT_PUBLIC_SUPABASE_URL:   ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY:  ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          GEMINI_API_KEY:             ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          cd databasewebsite
+          python harvester.py
+
+      # ── 5. Report summary ─────────────────────────────────────
+      - name: Print job summary
+        if: always()
+        run: echo "### ✅ Harvester run complete at $(date -u)" >> $GITHUB_STEP_SUMMARY
