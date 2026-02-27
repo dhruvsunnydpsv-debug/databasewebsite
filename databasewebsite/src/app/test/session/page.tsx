@@ -32,9 +32,9 @@ const STAGE_CONFIG = {
 function makePlaceholder(moduleFilter: string, difficulty: string, domain: string, index: number): Question {
     return {
         id: `placeholder-${moduleFilter}-${domain}-${difficulty}-${index}`,
-        question_text: `[Question Bank Building] This slot is reserved for a ${difficulty} question in the "${domain.replace(/_/g, ' ')}" domain (${moduleFilter.replace('_', ' ')}).\n\nOur automated harvester is currently generating questions for this topic. This placeholder will be replaced automatically within the next 15 minutes.`,
-        options: ["Continue", "Mark for Review", "Skip", "Next Question"],
-        correct_answer: "Continue",
+        question_text: "",
+        options: null,
+        correct_answer: "",
         domain,
         difficulty,
         module: moduleFilter,
@@ -371,10 +371,12 @@ export default function TestSessionPage() {
                                 {currentIdx + 1}
                             </p>
 
-                            {/* Question text */}
-                            <p style={{ fontSize: "1rem", lineHeight: 1.75, color: "#1e293b", marginBottom: "1.75rem", fontFamily: "Arial, 'Inter', sans-serif" }}>
-                                {q.question_text}
-                            </p>
+                            {/* Question text (hidden if placeholder) */}
+                            {!q.is_placeholder && (
+                                <p style={{ fontSize: "1rem", lineHeight: 1.75, color: "#1e293b", marginBottom: "1.75rem", fontFamily: "Arial, 'Inter', sans-serif" }}>
+                                    {q.question_text}
+                                </p>
+                            )}
 
                             {/* Options, SPR, or Placeholder */}
                             {q.is_placeholder ? (
