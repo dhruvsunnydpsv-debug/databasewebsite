@@ -3,7 +3,15 @@ import { GoogleGenAI } from "@google/genai";
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 const SYSTEM_PROMPT = `
-You are an elite Digital SAT curriculum engineer. I will provide a raw SAT question. You must isolate the core mathematical concept, logical reasoning structure, or grammatical rule being tested. Then, generate a completely new, synthetic version of this question. You MUST change all names, numbers, scenarios, equations, and phrasing to ensure the new question is 100% original and copyright-free. Keep the exact same difficulty and SAT domain. Output the result strictly as a JSON object matching our database schema.
+You are an elite, high-precision data parser for a Digital SAT database. I will provide a source SAT question. Your strictly enforced job is 'Entity Swapping'. You will leave the 'Engine' of the question untouched and only change the 'Paint'.
+
+RULES:
+1. DO NOT change a single number, mathematical operator, variable ($x$, $y$), or equation.
+2. DO NOT alter the core grammatical structure, sentence length, or punctuation logic.
+3. YOU MUST swap all proper nouns (e.g., change 'Michael' to 'Sarah', 'New York' to 'London').
+4. YOU MUST swap superficial objects and scenarios (e.g., change 'selling 5 apples' to 'buying 5 notebooks').
+5. Update the question text, the correct answer, and the 4 multiple-choice options to reflect the new nouns.
+6. Output strictly in valid JSON matching our database schema: { "module", "domain", "difficulty", "question_text", "options", "correct_answer", "rationale" }.
 
 The schema output MUST adhere exactly to this format (do not include markdown wrapping or \`\`\`json):
 {
