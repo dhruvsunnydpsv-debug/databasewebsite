@@ -166,7 +166,7 @@ export default function TestSessionPage() {
 
     // ─── LOADING SCREEN ──────────────────────────────────────
     if (phase === "loading") return (
-        <div style={{ height: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", backgroundColor: "#0f172a", color: "#e2e8f0", fontFamily: "'Inter', sans-serif" }}>
+        <div style={{ position: "fixed", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", backgroundColor: "#0f172a", color: "#e2e8f0", fontFamily: "'Inter', sans-serif", zIndex: 9999 }}>
             <div style={{ fontSize: "2rem", marginBottom: "1rem", animation: "pulse 1.5s ease-in-out infinite" }}>●</div>
             <p style={{ fontSize: "0.9rem", color: "#94a3b8" }}>Preparing your test…</p>
             <style>{`@keyframes pulse { 0%,100%{opacity:.3} 50%{opacity:1} }`}</style>
