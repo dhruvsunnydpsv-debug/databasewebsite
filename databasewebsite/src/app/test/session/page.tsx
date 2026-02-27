@@ -361,8 +361,29 @@ export default function TestSessionPage() {
                                 {q.question_text}
                             </p>
 
-                            {/* Options or SPR */}
-                            {q.options && q.options.length > 0 ? (
+                            {/* Options, SPR, or Placeholder */}
+                            {q.is_placeholder ? (
+                                // ── Placeholder card (bank building) ──────────
+                                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "200px", textAlign: "center", padding: "1.5rem 1rem" }}>
+                                    <div style={{ fontSize: "2.5rem", marginBottom: "1.25rem" }}>⏳</div>
+                                    <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem", flexWrap: "wrap", justifyContent: "center" }}>
+                                        <span style={{ backgroundColor: "#eff6ff", color: "#1d4ed8", border: "1px solid #bfdbfe", borderRadius: "9999px", padding: "0.2rem 0.75rem", fontSize: "0.72rem", fontWeight: 700 }}>
+                                            {q.module?.replace(/_/g, " ")}
+                                        </span>
+                                        <span style={{ backgroundColor: q.difficulty === "Hard" ? "#fef2f2" : q.difficulty === "Easy" ? "#f0fdf4" : "#fffbeb", color: q.difficulty === "Hard" ? "#dc2626" : q.difficulty === "Easy" ? "#16a34a" : "#d97706", border: `1px solid ${q.difficulty === "Hard" ? "#fecaca" : q.difficulty === "Easy" ? "#bbf7d0" : "#fde68a"}`, borderRadius: "9999px", padding: "0.2rem 0.75rem", fontSize: "0.72rem", fontWeight: 700 }}>
+                                            {q.difficulty}
+                                        </span>
+                                        <span style={{ backgroundColor: "#f8fafc", color: "#475569", border: "1px solid #e2e8f0", borderRadius: "9999px", padding: "0.2rem 0.75rem", fontSize: "0.72rem", fontWeight: 600 }}>
+                                            {q.domain?.replace(/_/g, " ")}
+                                        </span>
+                                    </div>
+                                    <p style={{ fontSize: "1rem", fontWeight: 700, color: "#1e293b", marginBottom: "0.5rem" }}>Question Bank Building…</p>
+                                    <p style={{ fontSize: "0.83rem", color: "#64748b", lineHeight: 1.6, maxWidth: "320px" }}>
+                                        Our engine is generating <strong>{q.difficulty}</strong> questions for <strong>{q.domain?.replace(/_/g, " ")}</strong>. Auto-fills within 15 minutes.
+                                    </p>
+                                    <p style={{ marginTop: "1.5rem", fontSize: "0.75rem", color: "#94a3b8" }}>Use Next → to continue.</p>
+                                </div>
+                            ) : q.options && q.options.length > 0 ? (
                                 <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem" }}>
                                     {q.options.map((opt: string, i: number) => {
                                         const letter = String.fromCharCode(65 + i);
@@ -411,26 +432,7 @@ export default function TestSessionPage() {
                             )}
                         </>
                     ) : (
-                        // ── Placeholder card ─────────────────────
-                        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", textAlign: "center", padding: "2rem" }}>
-                            <div style={{ fontSize: "2.5rem", marginBottom: "1.25rem" }}>⏳</div>
-                            <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem", flexWrap: "wrap", justifyContent: "center" }}>
-                                <span style={{ backgroundColor: "#eff6ff", color: "#1d4ed8", border: "1px solid #bfdbfe", borderRadius: "9999px", padding: "0.2rem 0.75rem", fontSize: "0.72rem", fontWeight: 700 }}>
-                                    {q.module?.replace("_", " ")}
-                                </span>
-                                <span style={{ backgroundColor: q.difficulty === "Hard" ? "#fef2f2" : q.difficulty === "Easy" ? "#f0fdf4" : "#fffbeb", color: q.difficulty === "Hard" ? "#dc2626" : q.difficulty === "Easy" ? "#16a34a" : "#d97706", border: `1px solid ${q.difficulty === "Hard" ? "#fecaca" : q.difficulty === "Easy" ? "#bbf7d0" : "#fde68a"}`, borderRadius: "9999px", padding: "0.2rem 0.75rem", fontSize: "0.72rem", fontWeight: 700 }}>
-                                    {q.difficulty}
-                                </span>
-                                <span style={{ backgroundColor: "#f8fafc", color: "#475569", border: "1px solid #e2e8f0", borderRadius: "9999px", padding: "0.2rem 0.75rem", fontSize: "0.72rem", fontWeight: 600 }}>
-                                    {q.domain?.replace(/_/g, " ")}
-                                </span>
-                            </div>
-                            <p style={{ fontSize: "1rem", fontWeight: 700, color: "#1e293b", marginBottom: "0.5rem" }}>Question Bank Building…</p>
-                            <p style={{ fontSize: "0.83rem", color: "#64748b", lineHeight: 1.6, maxWidth: "320px" }}>
-                                Our engine is generating <strong>{q.difficulty}</strong> questions for <strong>{q.domain?.replace(/_/g, " ")}</strong>. This slot will be filled automatically within the next 15 minutes.
-                            </p>
-                            <p style={{ marginTop: "1.5rem", fontSize: "0.75rem", color: "#94a3b8" }}>You can continue navigating — use Next → to proceed.</p>
-                        </div>
+                        <p style={{ color: "#94a3b8", fontStyle: "italic" }}>No questions loaded.</p>
                     )}
                 </div>
             </div>
