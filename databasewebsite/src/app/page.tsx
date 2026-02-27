@@ -1,3 +1,5 @@
+"use client";
+
 export default function Home() {
     return (
         <div style={{ backgroundColor: '#FBFBF2', minHeight: 'calc(100vh - 3.5rem)', overflow: 'hidden' }}>
