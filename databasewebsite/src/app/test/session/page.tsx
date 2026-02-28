@@ -107,7 +107,7 @@ async function fetchQuestions(stage: Stage, module1Score?: number, seenIds?: Set
                 try {
                     const controller = new AbortController();
                     const timeoutId = setTimeout(() => controller.abort(), 2000);
-                    const url = `${supabaseUrl}/rest/v1/sat_question_bank?section=eq.${modString}&domain=eq.${domain}&difficulty=eq.${tier.difficulty}&limit=50`;
+                    const url = `${supabaseUrl}/rest/v1/sat_question_bank?module=eq.${modString}&domain=eq.${domain}&difficulty=eq.${tier.difficulty}&limit=50`;
                     const res = await fetch(url, {
                         headers: { "apikey": supabaseKey, "Authorization": `Bearer ${supabaseKey}` },
                         signal: controller.signal,
