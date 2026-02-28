@@ -1,5 +1,7 @@
-import { createClient } from '@supabase/supabase-js';
-export const dynamic = 'force-dynamic';
+"use client";
+
+import { useEffect, useState } from 'react';
+import { supabase } from '@/lib/supabase';
 import Link from 'next/link';
 
 interface AuditRow {
@@ -15,20 +17,29 @@ interface AuditRow {
     created_at: string;
 }
 
-export default async function AdminAuditPage() {
-    // Server-side Supabase client — no client-side fetch needed
-    const supabase = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-    );
+export default function AdminAuditPage() {
+    const [rows, setRows] = useState<AuditRow[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
 
-    const { data, error } = await supabase
-        .from('sat_question_bank')
-        .select('id, module, domain, difficulty, source_method, question_text, options, correct_answer, raw_original_text, created_at')
-        .order('created_at', { ascending: false })
-        .limit(100);
+    useEffect(() => {
+        async function fetchAudit() {
+            setLoading(true);
+            const { data, error: dbError } = await supabase
+                .from('sat_question_bank')
+                .select('id, module, domain, difficulty, source_method, question_text, options, correct_answer, raw_original_text, created_at')
+                .order('created_at', { ascending: false })
+                .limit(100);
 
-    const rows: AuditRow[] = data || [];
+            if (dbError) {
+                setError(dbError.message);
+            } else if (data) {
+                setRows(data as AuditRow[]);
+            }
+            setLoading(false);
+        }
+        fetchAudit();
+    }, []);
 
     const tagColor = (source: string) =>
         source === 'Admin_Dropzone'
@@ -52,13 +63,13 @@ export default async function AdminAuditPage() {
 
             {/* ── Navigation Toggle ───────────────────────────── */}
             <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '2rem' }}>
-                <Link href="/admin/ingest" style={{
+                <Link href="/admin/questions" style={{
                     padding: '0.5rem 1.25rem', borderRadius: '9999px',
                     border: '1px solid #0D0D0D', backgroundColor: '#FAFAF2',
                     color: '#0D0D0D', fontSize: '0.8rem', fontWeight: 600,
                     textDecoration: 'none', transition: 'all 0.15s ease',
                 }}>
-                    Ingestion Dropzone
+                    Dashboard
                 </Link>
                 <Link href="/admin/audit" style={{
                     padding: '0.5rem 1.25rem', borderRadius: '9999px',
@@ -88,19 +99,26 @@ export default async function AdminAuditPage() {
             {/* ── Error ──────────────────────────────────────── */}
             {error && (
                 <div style={{ padding: '1rem', backgroundColor: '#FFF5F5', border: '1px solid #C0392B', borderRadius: '8px', marginBottom: '1.5rem' }}>
-                    <p style={{ fontSize: '0.8rem', color: '#C0392B', margin: 0 }}>Error: {error.message}</p>
+                    <p style={{ fontSize: '0.8rem', color: '#C0392B', margin: 0 }}>Error: {error}</p>
                 </div>
             )}
 
+            {/* ── Loading ────────────────────────────────────── */}
+            {loading && (
+                <p style={{ fontSize: '0.9rem', color: '#888880', textAlign: 'center', padding: '3rem 0' }}>
+                    Loading audit data...
+                </p>
+            )}
+
             {/* ── Empty State ────────────────────────────────── */}
-            {rows.length === 0 && !error && (
+            {rows.length === 0 && !loading && !error && (
                 <p style={{ fontSize: '0.9rem', color: '#888880', textAlign: 'center', padding: '3rem 0' }}>
                     No questions in the database yet.
                 </p>
             )}
 
             {/* ── Comparison Cards ─────────────────────────────── */}
-            {rows.map((row) => {
+            {!loading && rows.map((row) => {
                 const sc = tagColor(row.source_method || 'Automated_Pipeline');
                 return (
                     <div key={row.id} style={{
