@@ -238,22 +238,21 @@ export default function TestSessionPage() {
         } else if (stage === 2) {
             // End of Reading & Writing Section
             const m1Correct = moduleCorrectCounts[1] || 0;
-            const isHigher = m1Correct >= 15; // 15/22 is ~68%, let's use 15+ as requested 70%-ish threshold
+            const isHigher = m1Correct >= 15;
             const scaled = calculateSectionScaledScore(moduleWeightedScores[1] || 0, weighted, isHigher);
             setFinalRWScore(scaled);
             setPhase("between");
         } else if (stage === 4) {
-            // End of Math Section
+            // End of Math Section: GO STRAIGHT TO RESULTS
             const m3Correct = moduleCorrectCounts[3] || 0;
             const isHigher = m3Correct >= 15;
-            const scaled = calculateSectionScaledScore(moduleWeightedScores[3] || 0, weighted, isHigher);
+            const mathScaled = calculateSectionScaledScore(moduleWeightedScores[3] || 0, weighted, isHigher);
             
+            setFinalMathScore(mathScaled);
+            setFinalOverallScore(finalRWScore + mathScaled);
             
-            // Calculate and set final scores
-            setFinalMathScore(scaled);
-            setFinalOverallScore(finalRWScore + scaled);
-            
-            // Advance to complete screen
+            // We set the phase to complete last to give other states a tiny window 
+            // but we'll also handle the calculation in the render for safety.
             setPhase("complete");
         }
     };
@@ -455,7 +454,7 @@ export default function TestSessionPage() {
                                 </div>
                             ) : q.options && q.options.length > 0 ? (
                                 <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem" }}>
-                                    {q.options.map((opt: string, i: number) => {
+                                    {q.options?.map((opt: string, i: number) => {
                                         const letter = String.fromCharCode(65 + i);
                                         const selected = answers[currentIdx] === letter;
                                         return (
