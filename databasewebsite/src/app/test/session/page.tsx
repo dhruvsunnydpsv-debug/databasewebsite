@@ -43,6 +43,16 @@ function makePlaceholder(moduleFilter: string, difficulty: string, domain: strin
     };
 }
 
+// ─── Fisher-Yates Shuffle ──────────────────────────────────────
+function shuffleArray<T>(array: T[]): T[] {
+    const arr = [...array];
+    for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+}
+
 // ─── Supabase Adaptive Fetch ───────────────────────────────────
 async function fetchQuestions(stage: Stage, module1Score?: number): Promise<Question[]> {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -109,7 +119,8 @@ async function fetchQuestions(stage: Stage, module1Score?: number): Promise<Ques
                 try {
                     const controller = new AbortController();
                     const timeoutId = setTimeout(() => controller.abort(), 2000); // 2s strict timeout
-                    const url = `${supabaseUrl}/rest/v1/sat_question_bank?module=eq.${moduleFilter}&domain=eq.${domain}&difficulty=eq.${tier.difficulty}&limit=${fetchCount}&order=random()`;
+                    // Fetch a larger pool since we can't use order=random() in PostgREST
+                    const url = `${supabaseUrl}/rest/v1/sat_question_bank?module=eq.${moduleFilter}&domain=eq.${domain}&difficulty=eq.${tier.difficulty}&limit=50`;
                     const res = await fetch(url, {
                         headers: { "apikey": supabaseKey, "Authorization": `Bearer ${supabaseKey}` },
                         signal: controller.signal,
@@ -117,7 +128,9 @@ async function fetchQuestions(stage: Stage, module1Score?: number): Promise<Ques
                     clearTimeout(timeoutId);
                     if (res.ok) {
                         const rows: Question[] = await res.json();
-                        fetched.push(...rows.slice(0, fetchCount));
+                        // Shuffle the fetched pool to get a random selection
+                        const shuffledRows = shuffleArray(rows);
+                        fetched.push(...shuffledRows.slice(0, fetchCount));
                     }
                 } catch {
                     // Ignore error, will fill with placeholders
@@ -142,7 +155,8 @@ async function fetchQuestions(stage: Stage, module1Score?: number): Promise<Ques
     while (results.length < total) {
         results.push(makePlaceholder(moduleFilter, "Medium", "General", placeholderIdx++));
     }
-    return results.slice(0, total);
+    // Shuffle the final assembled test to mix difficulties and domains
+    return shuffleArray(results).slice(0, total);
 }
 
 // ─── Timer Display ────────────────────────────────────────────
@@ -164,12 +178,12 @@ export default function TestSessionPage() {
     const [timerSec, setTimerSec] = useState(STAGE_CONFIG[1].seconds);
     const [timerHidden, setTimerHidden] = useState(false);
     const [desmosOpen, setDesmosOpen] = useState(false);
-    
+
     // Scoring engine
     const [moduleCorrectCounts, setModuleCorrectCounts] = useState<Record<number, number>>({});
     const [moduleWeightedScores, setModuleWeightedScores] = useState<Record<number, number>>({});
-    
-    const [finalRWScore, setFinalRWScore] = useState(0); 
+
+    const [finalRWScore, setFinalRWScore] = useState(0);
     const [finalMathScore, setFinalMathScore] = useState(0);
     const [finalOverallScore, setFinalOverallScore] = useState(0);
 
@@ -216,19 +230,19 @@ export default function TestSessionPage() {
     // ─── Module Submit Logic ──────────────────────────────────
     const handleModuleEnd = () => {
         if (timerRef.current) clearInterval(timerRef.current);
-        
+
         // 1. Grade scored questions (indices 0-21)
         let correctRaw = 0;
         for (let i = 0; i < 22; i++) {
-          const q = questions[i];
-          const ans = q.options ? answers[i] : freeText[i];
-          if (ans && ans.trim().toLowerCase() === q.correct_answer?.trim().toLowerCase()) {
-            correctRaw++;
-          }
+            const q = questions[i];
+            const ans = q.options ? answers[i] : freeText[i];
+            if (ans && ans.trim().toLowerCase() === q.correct_answer?.trim().toLowerCase()) {
+                correctRaw++;
+            }
         }
-        
+
         const weighted = calculateModuleWeightedScore(questions, answers, freeText);
-        
+
         // Use functional state updates to ensure we have the absolute latest counts
         setModuleCorrectCounts(prev => ({ ...prev, [stage]: correctRaw }));
         setModuleWeightedScores(prev => ({ ...prev, [stage]: weighted }));
@@ -247,10 +261,10 @@ export default function TestSessionPage() {
             const m3Correct = moduleCorrectCounts[3] || 0;
             const isHigher = m3Correct >= 15;
             const mathScaled = calculateSectionScaledScore(moduleWeightedScores[3] || 0, weighted, isHigher);
-            
+
             setFinalMathScore(mathScaled);
             setFinalOverallScore(finalRWScore + mathScaled);
-            
+
             // We set the phase to complete last to give other states a tiny window 
             // but we'll also handle the calculation in the render for safety.
             setPhase("complete");
@@ -304,40 +318,40 @@ export default function TestSessionPage() {
 
     // ─── COMPLETE SCREEN ─────────────────────────────────────
     if (phase === "complete") {
-      const totalCorrect = (moduleCorrectCounts[1] || 0) + (moduleCorrectCounts[2] || 0) + (moduleCorrectCounts[3] || 0) + (moduleCorrectCounts[4] || 0);
-      return (
-        <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", backgroundColor: "#0f172a", color: "#e2e8f0", fontFamily: "'Inter', sans-serif", textAlign: "center", padding: "2rem" }}>
-            <p style={{ fontSize: "0.7rem", letterSpacing: "0.15em", textTransform: "uppercase", color: "#64748b", marginBottom: "0.75rem" }}>Practice Performance Dashboard</p>
-            <h2 style={{ fontSize: "6.5rem", fontWeight: 900, marginBottom: "0", lineHeight: 1, letterSpacing: "-0.02em" }}>{finalRWScore + finalMathScore}</h2>
-            <p style={{ fontSize: "0.8rem", color: "#94a3b8", marginBottom: "1rem", textTransform: "uppercase", letterSpacing: "0.1em" }}>Total Scaled Score (400–1600)</p>
-            <p style={{ fontSize: "0.85rem", color: "#64748b", marginBottom: "3rem" }}><strong>{totalCorrect}</strong> out of 88 questions correct (Excl. pretest)</p>
-            
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2rem", marginBottom: "3rem", width: "100%", maxWidth: "550px" }}>
-                <div style={{ padding: "1.75rem", backgroundColor: "#1e293b", borderRadius: "14px", border: "1px solid #334155", position: "relative", overflow: "hidden" }}>
-                    <div style={{ position: "absolute", top: 0, left: 0, width: "4px", height: "100%", backgroundColor: "#3b82f6" }}></div>
-                    <p style={{ fontSize: "2.25rem", fontWeight: 800, margin: 0 }}>{finalRWScore}</p>
-                    <p style={{ fontSize: "0.7rem", color: "#94a3b8", textTransform: "uppercase", fontWeight: 600 }}>Reading & Writing</p>
-                </div>
-                <div style={{ padding: "1.75rem", backgroundColor: "#1e293b", borderRadius: "14px", border: "1px solid #334155", position: "relative", overflow: "hidden" }}>
-                    <div style={{ position: "absolute", top: 0, left: 0, width: "4px", height: "100%", backgroundColor: "#ef4444" }}></div>
-                    <p style={{ fontSize: "2.25rem", fontWeight: 800, margin: 0 }}>{finalMathScore}</p>
-                    <p style={{ fontSize: "0.7rem", color: "#94a3b8", textTransform: "uppercase", fontWeight: 600 }}>Mathematics</p>
-                </div>
-            </div>
+        const totalCorrect = (moduleCorrectCounts[1] || 0) + (moduleCorrectCounts[2] || 0) + (moduleCorrectCounts[3] || 0) + (moduleCorrectCounts[4] || 0);
+        return (
+            <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", backgroundColor: "#0f172a", color: "#e2e8f0", fontFamily: "'Inter', sans-serif", textAlign: "center", padding: "2rem" }}>
+                <p style={{ fontSize: "0.7rem", letterSpacing: "0.15em", textTransform: "uppercase", color: "#64748b", marginBottom: "0.75rem" }}>Practice Performance Dashboard</p>
+                <h2 style={{ fontSize: "6.5rem", fontWeight: 900, marginBottom: "0", lineHeight: 1, letterSpacing: "-0.02em" }}>{finalRWScore + finalMathScore}</h2>
+                <p style={{ fontSize: "0.8rem", color: "#94a3b8", marginBottom: "1rem", textTransform: "uppercase", letterSpacing: "0.1em" }}>Total Scaled Score (400–1600)</p>
+                <p style={{ fontSize: "0.85rem", color: "#64748b", marginBottom: "3rem" }}><strong>{totalCorrect}</strong> out of 88 questions correct (Excl. pretest)</p>
 
-            <div style={{ maxWidth: "600px", backgroundColor: "rgba(255,255,255,0.03)", padding: "1rem", borderRadius: "6px", border: "1px dashed #334155", marginBottom: "2rem" }}>
-                <p style={{ fontSize: "0.72rem", color: "#64748b", lineHeight: 1.5, textAlign: "left" }}>
-                  <strong>Note:</strong> Difficulty mix affects points (Easy: 1.0, Medium: 1.5, Hard: 2.0). 
-                  Scaling adjusts based on the adaptive path taken (Higher vs Lower). 
-                  This implementation follows a research-based multistage adaptive model and does not claim to match the College Board's proprietary algorithm.
-                </p>
-            </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2rem", marginBottom: "3rem", width: "100%", maxWidth: "550px" }}>
+                    <div style={{ padding: "1.75rem", backgroundColor: "#1e293b", borderRadius: "14px", border: "1px solid #334155", position: "relative", overflow: "hidden" }}>
+                        <div style={{ position: "absolute", top: 0, left: 0, width: "4px", height: "100%", backgroundColor: "#3b82f6" }}></div>
+                        <p style={{ fontSize: "2.25rem", fontWeight: 800, margin: 0 }}>{finalRWScore}</p>
+                        <p style={{ fontSize: "0.7rem", color: "#94a3b8", textTransform: "uppercase", fontWeight: 600 }}>Reading & Writing</p>
+                    </div>
+                    <div style={{ padding: "1.75rem", backgroundColor: "#1e293b", borderRadius: "14px", border: "1px solid #334155", position: "relative", overflow: "hidden" }}>
+                        <div style={{ position: "absolute", top: 0, left: 0, width: "4px", height: "100%", backgroundColor: "#ef4444" }}></div>
+                        <p style={{ fontSize: "2.25rem", fontWeight: 800, margin: 0 }}>{finalMathScore}</p>
+                        <p style={{ fontSize: "0.7rem", color: "#94a3b8", textTransform: "uppercase", fontWeight: 600 }}>Mathematics</p>
+                    </div>
+                </div>
 
-            <a href="/" style={{ backgroundColor: "#E6D5F8", color: "#0D0D0D", border: "none", borderRadius: "9999px", padding: "0.8rem 2.5rem", fontSize: "0.95rem", fontWeight: 600, cursor: "pointer", textDecoration: "none" }}>
-                Return to Home
-            </a>
-        </div>
-      );
+                <div style={{ maxWidth: "600px", backgroundColor: "rgba(255,255,255,0.03)", padding: "1rem", borderRadius: "6px", border: "1px dashed #334155", marginBottom: "2rem" }}>
+                    <p style={{ fontSize: "0.72rem", color: "#64748b", lineHeight: 1.5, textAlign: "left" }}>
+                        <strong>Note:</strong> Difficulty mix affects points (Easy: 1.0, Medium: 1.5, Hard: 2.0).
+                        Scaling adjusts based on the adaptive path taken (Higher vs Lower).
+                        This implementation follows a research-based multistage adaptive model and does not claim to match the College Board's proprietary algorithm.
+                    </p>
+                </div>
+
+                <a href="/" style={{ backgroundColor: "#E6D5F8", color: "#0D0D0D", border: "none", borderRadius: "9999px", padding: "0.8rem 2.5rem", fontSize: "0.95rem", fontWeight: 600, cursor: "pointer", textDecoration: "none" }}>
+                    Return to Home
+                </a>
+            </div>
+        );
     }
 
     // ─── MAIN TESTING UI ─────────────────────────────────────
