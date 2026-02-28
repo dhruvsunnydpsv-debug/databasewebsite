@@ -4,7 +4,8 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
 import { calculateModuleWeightedScore, calculateSectionScaledScore } from "@/lib/scoring-logic";
 import { createClient } from "@supabase/supabase-js";
-import { Loader2, AlertCircle } from "lucide-react";
+import { Loader2, AlertCircle, Database, WifiOff } from "lucide-react";
+import { getMockQuestions } from "@/lib/mock-data";
 
 const DesmosCalculator = dynamic(() => import("../DesmosCalculator"), { ssr: false });
 
@@ -131,12 +132,14 @@ export default function BluebookSession() {
     const [finalRWScore, setFinalRWScore] = useState(0);
     const [finalMathScore, setFinalMathScore] = useState(0);
 
+    const [usingMock, setUsingMock] = useState(false);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
     const loadStage = useCallback(async (s: Stage, routingVal?: number, currentSeenIds?: Set<string>) => {
         setPhase("loading");
         setErrorMsg(null);
+        setUsingMock(false);
         setCurrentIndex(0);
         setAnswers({});
         setFreeText({});
@@ -145,13 +148,11 @@ export default function BluebookSession() {
             const qs = await fetchQuestions(s, routingVal, currentSeenIds);
             setQuestions(qs);
         } catch (err: any) {
-            console.error("Fetch Failure:", err);
+            console.error("Fetch Failure - Falling back to local bank:", err);
             setErrorMsg(err.message || "Unknown Connection Error");
+            setUsingMock(true);
             const cfg = STAGE_CONFIG[s];
-            const sec = cfg.subject === "math" ? "Math" : "Reading_Writing";
-            const fallback: Question[] = Array.from({ length: cfg.count }, (_, i) =>
-                makePlaceholder(sec, "Medium", "General", i)
-            );
+            const fallback = getMockQuestions(cfg.subject, cfg.count);
             setQuestions(fallback);
         } finally {
             setTimerSec(STAGE_CONFIG[s].seconds);
@@ -251,7 +252,7 @@ export default function BluebookSession() {
         );
     }
 
-    if (errorMsg || questions.length === 0) {
+    if (errorMsg && questions.length === 0) {
         return (
             <div className="h-screen w-screen flex flex-col items-center justify-center bg-white text-black font-sans p-8 text-center">
                 <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-6 mx-auto">
@@ -274,18 +275,16 @@ export default function BluebookSession() {
                         Back to Home
                     </a>
                 </div>
-                {errorMsg && (
-                    <div className="mt-12 p-4 bg-gray-50 rounded border border-gray-200 font-mono text-[10px] text-gray-400 max-w-lg mx-auto">
-                        DEBUG_RAW_ERROR: {errorMsg} <br />
-                        PROJECT_ENDPOINT: {supabaseUrl ? (supabaseUrl.includes('//') ? supabaseUrl.split('//')[1].split('.')[0] : supabaseUrl.split('.')[0]) : "NOT_FOUND"}
-                    </div>
-                )}
+                <div className="mt-12 p-4 bg-gray-50 rounded border border-gray-200 font-mono text-[10px] text-gray-400 max-w-lg mx-auto">
+                    DEBUG_RAW_ERROR: {errorMsg} <br />
+                    PROJECT_ENDPOINT: {supabaseUrl ? (supabaseUrl.includes('//') ? supabaseUrl.split('//')[1].split('.')[0] : supabaseUrl.split('.')[0]) : "NOT_FOUND"}
+                </div>
             </div>
         );
     }
 
     if (phase === "between") {
-        const cfg = STAGE_CONFIG[stage];
+        const cfg = STAGE_CONFIG[stage as 1 | 2 | 3 | 4];
         return (
             <div className="h-screen w-screen flex flex-col items-center justify-center bg-white text-black font-sans text-center p-8">
                 <p className="text-sm tracking-widest uppercase text-gray-500 mb-3">Section Complete</p>
@@ -344,6 +343,11 @@ export default function BluebookSession() {
                 <div className="flex items-center gap-3">
                     <span className="font-semibold text-sm cursor-pointer hover:bg-[#2D3646] px-2 py-1 rounded transition-colors">Directions ▼</span>
                     <span className="text-gray-300 text-sm border-l border-[#3A4556] pl-3 py-1 font-medium tracking-wide">{cfg.label}</span>
+                    {usingMock && (
+                        <span className="bg-[#E67E22] text-white text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-widest flex items-center gap-1 animate-pulse ml-2 shadow-sm border border-[#D35400]">
+                            <WifiOff className="w-2.5 h-2.5" /> Local Database Active
+                        </span>
+                    )}
                 </div>
 
                 {/* Timer Area */}
@@ -366,7 +370,7 @@ export default function BluebookSession() {
                         </button>
                     )}
                     <button
-                        onClick={() => setMarked(prev => {
+                        onClick={() => setMarked((prev: Set<number>) => {
                             const n = new Set(prev);
                             n.has(currentIndex) ? n.delete(currentIndex) : n.add(currentIndex);
                             return n;
