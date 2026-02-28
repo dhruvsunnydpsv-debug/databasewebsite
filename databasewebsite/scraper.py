@@ -327,12 +327,16 @@ def auto_repair_untagged(supabase: Client, groq_client: Groq):
         print("Auto-repair: All rows have valid tags. Nothing to fix.")
         return
 
-    print(f"Auto-repair: Found {len(broken)} rows with invalid tags. Repairing…")
+    # Cap at 20 repairs per run to stay within the 10-min GitHub Actions timeout.
+    # Over successive 15-min cron runs, all broken rows will eventually be fixed.
+    REPAIR_BATCH_SIZE = 20
+    batch = broken[:REPAIR_BATCH_SIZE]
+    print(f"Auto-repair: Found {len(broken)} rows with invalid tags. Repairing batch of {len(batch)}…")
 
     repaired = 0
     failed = 0
 
-    for row in broken:
+    for row in batch:
         rid = row["id"]
         qtext = row.get("question_text", "")
 
