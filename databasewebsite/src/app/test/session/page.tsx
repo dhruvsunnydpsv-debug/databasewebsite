@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
 import { calculateModuleWeightedScore, calculateSectionScaledScore } from "@/lib/scoring-logic";
 import { createClient } from "@supabase/supabase-js";
+import { Loader2, AlertCircle } from "lucide-react";
 
 const DesmosCalculator = dynamic(() => import("../DesmosCalculator"), { ssr: false });
 
@@ -54,11 +55,16 @@ function shuffleArray<T>(array: T[]): T[] {
 }
 
 // ─── Direct Supabase Client Fetcher (NO 400 ERRORS) ───────────
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const supabase = createClient(supabaseUrl, supabaseKey);
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+
+const isConfigured = supabaseUrl && supabaseKey;
+const supabase = isConfigured ? createClient(supabaseUrl, supabaseKey) : null;
 
 async function fetchQuestions(stage: Stage, module1Score?: number, seenIds?: Set<string>): Promise<Question[]> {
+    if (!supabase) {
+        throw new Error("Supabase credentials missing. Check environment variables.");
+    }
     const cfg = STAGE_CONFIG[stage];
     const isMath = cfg.subject === "math";
     const total = cfg.count;
@@ -125,10 +131,12 @@ export default function BluebookSession() {
     const [finalRWScore, setFinalRWScore] = useState(0);
     const [finalMathScore, setFinalMathScore] = useState(0);
 
+    const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
     const loadStage = useCallback(async (s: Stage, routingVal?: number, currentSeenIds?: Set<string>) => {
         setPhase("loading");
+        setErrorMsg(null);
         setCurrentIndex(0);
         setAnswers({});
         setFreeText({});
@@ -136,7 +144,9 @@ export default function BluebookSession() {
         try {
             const qs = await fetchQuestions(s, routingVal, currentSeenIds);
             setQuestions(qs);
-        } catch {
+        } catch (err: any) {
+            console.error("Fetch Failure:", err);
+            setErrorMsg(err.message || "Unknown Connection Error");
             const cfg = STAGE_CONFIG[s];
             const sec = cfg.subject === "math" ? "Math" : "Reading_Writing";
             const fallback: Question[] = Array.from({ length: cfg.count }, (_, i) =>
@@ -154,7 +164,7 @@ export default function BluebookSession() {
     useEffect(() => {
         if (phase !== "testing") { if (timerRef.current) clearInterval(timerRef.current); return; }
         timerRef.current = setInterval(() => {
-            setTimerSec(t => {
+            setTimerSec((t: number) => {
                 if (t <= 1) { clearInterval(timerRef.current!); handleModuleEnd(); return 0; }
                 return t - 1;
             });
@@ -232,7 +242,46 @@ export default function BluebookSession() {
     };
 
     if (phase === "loading") {
-        return <div className="h-screen w-screen flex items-center justify-center bg-white text-black text-xl font-sans">Loading Secure Test Environment...</div>;
+        return (
+            <div className="h-screen w-screen flex flex-col items-center justify-center bg-white text-black font-sans text-center">
+                <Loader2 className="w-10 h-10 text-blue-600 animate-spin mb-4 mx-auto" />
+                <div className="text-xl font-medium">Synchronizing Question Bank...</div>
+                <div className="text-xs text-gray-400 mt-2 uppercase tracking-widest">Digital SAT Secure Environment</div>
+            </div>
+        );
+    }
+
+    if (errorMsg || questions.length === 0) {
+        return (
+            <div className="h-screen w-screen flex flex-col items-center justify-center bg-white text-black font-sans p-8 text-center">
+                <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-6 mx-auto">
+                    <AlertCircle className="w-8 h-8 text-red-600" />
+                </div>
+                <h2 className="text-2xl font-bold mb-2">Sync Connection Failed</h2>
+                <p className="text-gray-600 max-w-md mb-8 mx-auto">
+                    {errorMsg?.includes("Failed to fetch") || errorMsg?.includes("timeout")
+                        ? "The database connection timed out. This usually means the Supabase project is paused or there is a network restriction."
+                        : errorMsg || "The question bank could not be reached. Please check your internet connection and try again."}
+                </p>
+                <div className="flex gap-4 justify-center">
+                    <button
+                        onClick={() => window.location.reload()}
+                        className="px-8 py-3 bg-black text-white rounded-full font-bold hover:bg-gray-800 transition-all border border-black shadow-md hover:-translate-y-0.5"
+                    >
+                        Retry Connection
+                    </button>
+                    <a href="/" className="px-8 py-3 border border-black rounded-full font-bold hover:bg-gray-50 transition-all shadow-sm">
+                        Back to Home
+                    </a>
+                </div>
+                {errorMsg && (
+                    <div className="mt-12 p-4 bg-gray-50 rounded border border-gray-200 font-mono text-[10px] text-gray-400 max-w-lg mx-auto">
+                        DEBUG_RAW_ERROR: {errorMsg} <br />
+                        PROJECT_ENDPOINT: {supabaseUrl ? (supabaseUrl.includes('//') ? supabaseUrl.split('//')[1].split('.')[0] : supabaseUrl.split('.')[0]) : "NOT_FOUND"}
+                    </div>
+                )}
+            </div>
+        );
     }
 
     if (phase === "between") {
