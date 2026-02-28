@@ -54,7 +54,7 @@ function shuffleArray<T>(array: T[]): T[] {
 }
 
 // ─── Supabase Adaptive Fetch ───────────────────────────────────
-async function fetchQuestions(stage: Stage, module1Score?: number): Promise<Question[]> {
+async function fetchQuestions(stage: Stage, module1Score?: number, seenIds?: Set<string>): Promise<Question[]> {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
     const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
@@ -78,21 +78,19 @@ async function fetchQuestions(stage: Stage, module1Score?: number): Promise<Ques
             { difficulty: "Hard", count: total - Math.floor(total * 0.30) - Math.floor(total * 0.40) },
         ];
     } else {
-        // Module 2 Routing: Accuracy check (15.4/22 rounded is 16)
-        const isHigherPath = (module1Score ?? 0) >= 16;
+        // Module 2 Routing: Accuracy check (>= 65%)
+        const isHigherPath = (module1Score ?? 0) >= 65;
         if (isHigherPath) {
-            // Higher: 15% Easy, 35% Medium, 50% Hard
+            // Higher Routing: Strictly Medium and Hard (0% Easy)
             tiers = [
-                { difficulty: "Easy", count: Math.floor(total * 0.15) },
-                { difficulty: "Medium", count: Math.floor(total * 0.35) },
-                { difficulty: "Hard", count: total - Math.floor(total * 0.15) - Math.floor(total * 0.35) },
+                { difficulty: "Medium", count: Math.floor(total * 0.40) },
+                { difficulty: "Hard", count: total - Math.floor(total * 0.40) },
             ];
         } else {
-            // Lower: 45% Easy, 40% Medium, 15% Hard
+            // Lower Routing: Strictly Easy and Medium (0% Hard)
             tiers = [
-                { difficulty: "Easy", count: Math.floor(total * 0.45) },
-                { difficulty: "Medium", count: Math.floor(total * 0.40) },
-                { difficulty: "Hard", count: total - Math.floor(total * 0.45) - Math.floor(total * 0.40) },
+                { difficulty: "Easy", count: Math.floor(total * 0.60) },
+                { difficulty: "Medium", count: total - Math.floor(total * 0.60) },
             ];
         }
     }
@@ -120,7 +118,7 @@ async function fetchQuestions(stage: Stage, module1Score?: number): Promise<Ques
                     const controller = new AbortController();
                     const timeoutId = setTimeout(() => controller.abort(), 2000); // 2s strict timeout
                     // Fetch a larger pool since we can't use order=random() in PostgREST
-                    const url = `${supabaseUrl}/rest/v1/sat_question_bank?module=eq.${moduleFilter}&domain=eq.${domain}&difficulty=eq.${tier.difficulty}&limit=50`;
+                    const url = `${supabaseUrl}/rest/v1/sat_question_bank?section=eq.${moduleFilter}&domain=eq.${domain}&difficulty=eq.${tier.difficulty}&limit=50`;
                     const res = await fetch(url, {
                         headers: { "apikey": supabaseKey, "Authorization": `Bearer ${supabaseKey}` },
                         signal: controller.signal,
@@ -128,8 +126,10 @@ async function fetchQuestions(stage: Stage, module1Score?: number): Promise<Ques
                     clearTimeout(timeoutId);
                     if (res.ok) {
                         const rows: Question[] = await res.json();
+                        // Deduplication: filter out any ids we've already seen in Module 1
+                        const freshRows = seenIds ? rows.filter(r => !seenIds.has(r.id)) : rows;
                         // Shuffle the fetched pool to get a random selection
-                        const shuffledRows = shuffleArray(rows);
+                        const shuffledRows = shuffleArray(freshRows);
                         fetched.push(...shuffledRows.slice(0, fetchCount));
                     }
                 } catch {
@@ -178,6 +178,7 @@ export default function TestSessionPage() {
     const [timerSec, setTimerSec] = useState(STAGE_CONFIG[1].seconds);
     const [timerHidden, setTimerHidden] = useState(false);
     const [desmosOpen, setDesmosOpen] = useState(false);
+    const [seenIds, setSeenIds] = useState<Set<string>>(new Set());
 
     // Scoring engine
     const [moduleCorrectCounts, setModuleCorrectCounts] = useState<Record<number, number>>({});
@@ -189,14 +190,14 @@ export default function TestSessionPage() {
 
     const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-    const loadStage = useCallback(async (s: Stage, routingVal?: number) => {
+    const loadStage = useCallback(async (s: Stage, routingVal?: number, currentSeenIds?: Set<string>) => {
         setPhase("loading");
         setCurrentIdx(0);
         setAnswers({});
         setFreeText({});
         setMarked(new Set());
         try {
-            const qs = await fetchQuestions(s, routingVal);
+            const qs = await fetchQuestions(s, routingVal, currentSeenIds);
             setQuestions(qs);
         } catch {
             // Absolute worst-case: fill with placeholders so it never stays stuck
@@ -213,7 +214,7 @@ export default function TestSessionPage() {
         }
     }, []);
 
-    useEffect(() => { loadStage(1); }, []);
+    useEffect(() => { loadStage(1, undefined, new Set()); }, []);
 
     // ─── Countdown Timer ─────────────────────────────────────
     useEffect(() => {
@@ -276,7 +277,15 @@ export default function TestSessionPage() {
         if (next > 4) { setPhase("complete"); return; }
         const accuracyPct = Math.round(((moduleCorrectCounts[stage] || 0) / 22) * 100);
         setStage(next);
-        loadStage(next, accuracyPct);
+
+        // Track the IDs used in the current module to prevent duplicates in the next
+        const newSeen = new Set(seenIds);
+        questions.forEach((q: Question) => {
+            if (!q.is_placeholder) newSeen.add(q.id);
+        });
+        setSeenIds(newSeen);
+
+        loadStage(next, accuracyPct, newSeen);
     };
 
     const q = questions[currentIdx];
