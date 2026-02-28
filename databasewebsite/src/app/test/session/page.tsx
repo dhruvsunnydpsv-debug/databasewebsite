@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
 
 const DesmosCalculator = dynamic(() => import("../DesmosCalculator"), { ssr: false });
-import { calculateWeightedScore, calculateSectionScore } from "@/lib/scoring-logic";
 
 // ─── Types ────────────────────────────────────────────────────
 interface Question {
@@ -23,10 +22,10 @@ type Stage = 1 | 2 | 3 | 4;
 type Phase = "loading" | "testing" | "between" | "complete";
 
 const STAGE_CONFIG = {
-    1: { label: "Reading & Writing — Module 1", count: 24, seconds: 32 * 60, subject: "rw" },
-    2: { label: "Reading & Writing — Module 2", count: 24, seconds: 32 * 60, subject: "rw" },
-    3: { label: "Math — Module 1", count: 24, seconds: 35 * 60, subject: "math" },
-    4: { label: "Math — Module 2", count: 24, seconds: 35 * 60, subject: "math" },
+    1: { label: "Reading & Writing — Module 1", count: 27, seconds: 32 * 60, subject: "rw" },
+    2: { label: "Reading & Writing — Module 2", count: 27, seconds: 32 * 60, subject: "rw" },
+    3: { label: "Math — Module 1", count: 22, seconds: 35 * 60, subject: "math" },
+    4: { label: "Math — Module 2", count: 22, seconds: 35 * 60, subject: "math" },
 } as const;
 
 // ─── Placeholder generator (used when DB bucket is empty) ───
@@ -61,28 +60,24 @@ async function fetchQuestions(stage: Stage, module1Score?: number): Promise<Ques
     // Difficulty distribution
     let tiers: { difficulty: string; count: number }[];
     if (stage === 1 || stage === 3) {
-        // Module 1: 30% Easy, 40% Medium, 30% Hard
         tiers = [
-            { difficulty: "Easy", count: Math.floor(total * 0.30) },
-            { difficulty: "Medium", count: Math.floor(total * 0.40) },
-            { difficulty: "Hard", count: total - Math.floor(total * 0.30) - Math.floor(total * 0.40) },
+            { difficulty: "Easy", count: Math.round(total * 0.30) },
+            { difficulty: "Medium", count: Math.round(total * 0.40) },
+            { difficulty: "Hard", count: total - Math.round(total * 0.30) - Math.round(total * 0.40) },
         ];
     } else {
-        // Module 2 Routing: >= 70% correct in Module 1 (scored questions 0-21)
-        const isHigherPath = (module1Score ?? 0) >= 70;
-        if (isHigherPath) {
-            // Higher-Difficulty Module 2: 15% Easy, 35% Medium, 50% Hard
+        const upperRouting = (module1Score ?? 0) > 65;
+        if (upperRouting) {
             tiers = [
-                { difficulty: "Easy", count: Math.floor(total * 0.15) },
-                { difficulty: "Medium", count: Math.floor(total * 0.35) },
-                { difficulty: "Hard", count: total - Math.floor(total * 0.15) - Math.floor(total * 0.35) },
+                { difficulty: "Easy", count: Math.round(total * 0.10) },
+                { difficulty: "Medium", count: Math.round(total * 0.35) },
+                { difficulty: "Hard", count: total - Math.round(total * 0.10) - Math.round(total * 0.35) },
             ];
         } else {
-            // Lower-Difficulty Module 2: 45% Easy, 40% Medium, 15% Hard
             tiers = [
-                { difficulty: "Easy", count: Math.floor(total * 0.45) },
-                { difficulty: "Medium", count: Math.floor(total * 0.40) },
-                { difficulty: "Hard", count: total - Math.floor(total * 0.45) - Math.floor(total * 0.40) },
+                { difficulty: "Easy", count: Math.round(total * 0.45) },
+                { difficulty: "Medium", count: Math.round(total * 0.40) },
+                { difficulty: "Hard", count: total - Math.round(total * 0.45) - Math.round(total * 0.40) },
             ];
         }
     }
@@ -164,25 +159,18 @@ export default function TestSessionPage() {
     const [timerSec, setTimerSec] = useState(STAGE_CONFIG[1].seconds);
     const [timerHidden, setTimerHidden] = useState(false);
     const [desmosOpen, setDesmosOpen] = useState(false);
-    
-    // Scoring State
-    const [stageCorrectCounts, setStageCorrectCounts] = useState<Record<number, number>>({});
-    const [stageWeightedScores, setStageWeightedScores] = useState<Record<number, number>>({});
-    const [module1Accuracy, setModule1Accuracy] = useState<number>(0); // Percentage for routing
-    
-    const [finalRWScore, setFinalRWScore] = useState(0);
-    const [finalMathScore, setFinalMathScore] = useState(0);
-    
+    const [module1Score, setModule1Score] = useState<number>(0);
+    const [totalScore, setTotalScore] = useState(0);
     const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-    const loadStage = useCallback(async (s: Stage, accuracy?: number) => {
+    const loadStage = useCallback(async (s: Stage, score?: number) => {
         setPhase("loading");
         setCurrentIdx(0);
         setAnswers({});
         setFreeText({});
         setMarked(new Set());
         try {
-            const qs = await fetchQuestions(s, accuracy);
+            const qs = await fetchQuestions(s, score);
             setQuestions(qs);
         } catch {
             // Absolute worst-case: fill with placeholders so it never stays stuck
@@ -216,38 +204,22 @@ export default function TestSessionPage() {
     // ─── Module Submit Logic ──────────────────────────────────
     const handleModuleEnd = () => {
         if (timerRef.current) clearInterval(timerRef.current);
-        
-        // 1. Grade scored questions (indices 0-21)
-        let correctCount = 0;
-        for (let i = 0; i < 22; i++) {
-            const q = questions[i];
+        // Grade current module
+        let correct = 0;
+        questions.forEach((q, i) => {
             const ans = q.options ? answers[i] : freeText[i];
-            if (ans && ans.trim().toLowerCase() === q.correct_answer?.trim().toLowerCase()) {
-                correctCount++;
-            }
-        }
-        
-        // 2. Calculate weighted score
-        const weighted = calculateWeightedScore(questions, answers, freeText);
-        setStageCorrectCounts(prev => ({ ...prev, [stage]: correctCount }));
-        setStageWeightedScores(prev => ({ ...prev, [stage]: weighted }));
+            if (ans && ans.trim().toLowerCase() === q.correct_answer?.trim().toLowerCase()) correct++;
+        });
+        const pct = questions.length > 0 ? Math.round((correct / questions.length) * 100) : 0;
 
-        // 3. Routing & Transitions
         if (stage === 1 || stage === 3) {
-            const accuracy = Math.round((correctCount / 22) * 100);
-            setModule1Accuracy(accuracy);
+            setModule1Score(pct);
             setPhase("between");
         } else if (stage === 2) {
-            // Finish RW Section
-            const isHigher = (stageCorrectCounts[1] || 0) >= 15.4; // 70% of 22 is 15.4
-            // Wait, accuracy is rounded, so 16/22 is 72.7%, 15/22 is 68.1%.
-            const finalRW = calculateSectionScore(stageWeightedScores[1] || 0, weighted, (stageCorrectCounts[1] || 0) >= 16);
-            setFinalRWScore(finalRW);
-            setPhase("between");
-        } else if (stage === 4) {
-            // Finish Math Section
-            const finalMath = calculateSectionScore(stageWeightedScores[3] || 0, weighted, (stageCorrectCounts[3] || 0) >= 16);
-            setFinalMathScore(finalMath);
+            setTotalScore(prev => prev + correct);
+            setPhase("between"); // Transition to Math
+        } else {
+            setTotalScore(prev => prev + correct);
             setPhase("complete");
         }
     };
@@ -256,7 +228,7 @@ export default function TestSessionPage() {
         const next = (stage + 1) as Stage;
         if (next > 4) { setPhase("complete"); return; }
         setStage(next);
-        loadStage(next, module1Accuracy);
+        loadStage(next, module1Score);
     };
 
     const q = questions[currentIdx];
@@ -278,10 +250,10 @@ export default function TestSessionPage() {
         <div style={{ height: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", backgroundColor: "#0f172a", color: "#e2e8f0", fontFamily: "'Inter', sans-serif", textAlign: "center", padding: "2rem" }}>
             <p style={{ fontSize: "0.7rem", letterSpacing: "0.15em", textTransform: "uppercase", color: "#64748b", marginBottom: "0.75rem" }}>Section Complete</p>
             <h2 style={{ fontSize: "2rem", fontWeight: 700, marginBottom: "1rem" }}>{cfg.label}</h2>
-            <p style={{ color: "#94a3b8", marginBottom: "0.5rem", fontSize: "0.9rem" }}>Module {stage % 2 === 1 ? "1" : "2"} accuracy: <strong style={{ color: "#e2e8f0" }}>{module1Accuracy}%</strong></p>
+            <p style={{ color: "#94a3b8", marginBottom: "0.5rem", fontSize: "0.9rem" }}>Module {stage % 2 === 1 ? "1" : "2"} score: <strong style={{ color: "#e2e8f0" }}>{module1Score}%</strong></p>
             {stage < 4 && <p style={{ color: "#64748b", marginBottom: "2rem", fontSize: "0.85rem" }}>
                 {stage === 1 ? "Next: Reading & Writing Module 2" : stage === 2 ? "Next: Math Module 1" : "Next: Math Module 2"}
-                {(stage === 1 || stage === 3) && <span style={{ color: module1Accuracy >= 70 ? "#4ade80" : "#f87171", marginLeft: "0.5rem" }}>({module1Accuracy >= 70 ? "Higher" : "Lower"} difficulty routing)</span>}
+                {(stage === 1 || stage === 3) && <span style={{ color: module1Score >= 65 ? "#4ade80" : "#f87171", marginLeft: "0.5rem" }}>({module1Score >= 65 ? "Upper" : "Lower"} routing)</span>}
             </p>}
             {stage < 4 ? (
                 <button onClick={handleNextModule} style={{ backgroundColor: "#3b82f6", color: "#fff", border: "none", borderRadius: "8px", padding: "0.8rem 2rem", fontSize: "0.95rem", fontWeight: 600, cursor: "pointer" }}>
@@ -297,30 +269,10 @@ export default function TestSessionPage() {
 
     // ─── COMPLETE SCREEN ─────────────────────────────────────
     if (phase === "complete") return (
-        <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", backgroundColor: "#0f172a", color: "#e2e8f0", fontFamily: "'Inter', sans-serif", textAlign: "center", padding: "2rem" }}>
-            <p style={{ fontSize: "0.7rem", letterSpacing: "0.15em", textTransform: "uppercase", color: "#64748b", marginBottom: "0.75rem" }}>Test Results</p>
-            <h2 style={{ fontSize: "3rem", fontWeight: 900, marginBottom: "0.5rem" }}>{finalRWScore + finalMathScore}</h2>
-            <p style={{ color: "#94a3b8", fontSize: "1rem", marginBottom: "2rem" }}>Total Score (400–1600)</p>
-            
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2rem", marginBottom: "3rem", width: "100%", maxWidth: "500px" }}>
-                <div style={{ padding: "1.5rem", backgroundColor: "#1e293b", borderRadius: "12px" }}>
-                    <p style={{ fontSize: "1.5rem", fontWeight: 700, margin: 0 }}>{finalRWScore}</p>
-                    <p style={{ fontSize: "0.75rem", color: "#94a3b8", marginTop: "0.25rem" }}>Reading & Writing</p>
-                </div>
-                <div style={{ padding: "1.5rem", backgroundColor: "#1e293b", borderRadius: "12px" }}>
-                    <p style={{ fontSize: "1.5rem", fontWeight: 700, margin: 0 }}>{finalMathScore}</p>
-                    <p style={{ fontSize: "0.75rem", color: "#94a3b8", marginTop: "0.25rem" }}>Math</p>
-                </div>
-            </div>
-
-            <div style={{ backgroundColor: "rgba(255,255,255,0.05)", padding: "1.5rem", borderRadius: "8px", maxWidth: "600px", marginBottom: "2rem" }}>
-                <p style={{ fontSize: "0.75rem", color: "#64748b", lineHeight: 1.6, textAlign: "left" }}>
-                    <strong>Disclaimer:</strong> This score is calculated using a SAT-style multistage adaptive model. 
-                    Difficulty is weighted (Easy: 1.0, Medium: 1.5, Hard: 2.0). Raw scores are scaled to the 200-800 section range. 
-                    This algorithm is for practice purposes only and does <strong>not</strong> necessarily match the College Board's exact scoring methodology.
-                </p>
-            </div>
-
+        <div style={{ height: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", backgroundColor: "#0f172a", color: "#e2e8f0", fontFamily: "'Inter', sans-serif", textAlign: "center", padding: "2rem" }}>
+            <p style={{ fontSize: "0.7rem", letterSpacing: "0.15em", textTransform: "uppercase", color: "#64748b", marginBottom: "0.75rem" }}>Test Complete</p>
+            <h2 style={{ fontSize: "2.5rem", fontWeight: 900, marginBottom: "2rem" }}>🎉 Well Done</h2>
+            <p style={{ color: "#94a3b8", fontSize: "1rem", marginBottom: "2rem" }}>You have completed all 4 modules of this Digital SAT practice session.</p>
             <a href="/" style={{ backgroundColor: "#E6D5F8", color: "#0D0D0D", border: "none", borderRadius: "9999px", padding: "0.8rem 2rem", fontSize: "0.95rem", fontWeight: 600, cursor: "pointer", textDecoration: "none" }}>
                 Return Home
             </a>
