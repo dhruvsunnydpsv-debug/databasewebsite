@@ -1,4 +1,5 @@
 "use client";
+export const dynamic = 'force-dynamic';
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
@@ -9,7 +10,8 @@ import {
     BarChart3,
     Clock,
     PlusCircle,
-    ArrowRight
+    ArrowRight,
+    Upload
 } from 'lucide-react';
 import Link from 'next/link';
 

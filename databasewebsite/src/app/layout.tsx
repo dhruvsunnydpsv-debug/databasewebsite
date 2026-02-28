@@ -1,7 +1,6 @@
 import type { Metadata } from 'next'
 import { Inter, Playfair_Display } from 'next/font/google'
 import './globals.css'
-import AdminBackdoor from './AdminBackdoor'
 import { HeaderWrapper, FooterWrapper } from './LayoutWrappers'
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter', display: 'swap' })

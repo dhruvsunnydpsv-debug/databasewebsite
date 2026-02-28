@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+export const dynamic = 'force-dynamic';
 import { generateSyntheticQuestion } from '../../../lib/groq';
 import { supabase } from '../../../lib/supabase';
 

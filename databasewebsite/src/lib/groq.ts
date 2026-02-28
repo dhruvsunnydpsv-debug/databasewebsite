@@ -1,6 +1,6 @@
 import Groq from "groq-sdk";
 
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY || 'placeholder' });
 
 const SYSTEM_PROMPT = `You are an elite SAT data parser. I will provide a raw SAT question.
 RULE 1 (Entity Swap): You must perform strict 'Entity Swapping'. DO NOT change any mathematical formulas, numbers, equations, or core logic. You must ONLY swap the 'paint': proper nouns, names, cities, and superficial objects (e.g., change 'John buying 5 apples' to 'Sarah buying 5 notebooks'). Keep the difficulty identical.
