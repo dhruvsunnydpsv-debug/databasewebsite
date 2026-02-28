@@ -17,6 +17,8 @@ export const metadata: Metadata = {
     description: 'Entity-swap pipeline for generating copyright-free SAT questions at scale.',
 }
 
+import { AuthProvider } from '@/lib/auth-context'
+
 export default function RootLayout({
     children,
 }: {
@@ -25,6 +27,7 @@ export default function RootLayout({
     return (
         <html lang="en" className={`${inter.variable} ${playfair.variable}`}>
             <body className={inter.className} style={{ backgroundColor: '#FBFBF2', color: '#0D0D0D', margin: 0 }}>
+                <AuthProvider>
 
                 {/* ── Header ───────────────────────────────────────────── */}
                 <HeaderWrapper>
@@ -91,9 +94,7 @@ export default function RootLayout({
                     </footer>
                 </FooterWrapper>
 
-                {/* ── Hidden Admin Backdoor (Client Component) ─────────── */}
-                <AdminBackdoor />
-
+                </AuthProvider>
             </body>
         </html>
     )
