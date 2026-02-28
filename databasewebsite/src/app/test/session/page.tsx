@@ -362,7 +362,7 @@ export default function BluebookSession() {
                             </div>
                         ) : currentQ.options && currentQ.options.length > 0 ? (
                             <fieldset className="space-y-3">
-                                {currentQ.options.map((opt, idx) => {
+                                {currentQ.options.map((opt: string, idx: number) => {
                                     const letter = ['A', 'B', 'C', 'D'][idx];
                                     const selected = answers[currentIndex] === letter;
                                     return (
