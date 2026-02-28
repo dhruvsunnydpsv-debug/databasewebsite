@@ -34,7 +34,7 @@ export default function Home() {
                         Curriculum
                     </a>
                     <a
-                        href="/test/session"
+                        href="/test/session/"
                         className="px-6 py-2 bg-[#1A1A1A] text-[#FBFBF2] rounded-full text-sm font-bold hover:bg-black hover:-translate-y-0.5 transition-all shadow-md"
                     >
                         Sign In →
@@ -59,7 +59,7 @@ export default function Home() {
 
                 <div className="flex flex-wrap gap-4 justify-center mt-6">
                     <a
-                        href="/test/session"
+                        href="/test/session/"
                         className="px-10 py-4 bg-[#E6D5F8] text-black font-bold text-lg rounded-full border border-black shadow-[0_4px_14px_rgba(230,213,248,0.4),inset_0_-2px_0_rgba(0,0,0,0.1)] hover:shadow-[0_8px_24px_rgba(230,213,248,0.6),inset_0_-2px_0_rgba(0,0,0,0.1)] hover:-translate-y-1 transition-all active:translate-y-0"
                     >
                         View Question Bank →
