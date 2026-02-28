@@ -26,18 +26,38 @@ export const MAX_M2_LOWER_RAW_WEIGHTED = 29.7;
 
 
 /**
- * Calculates raw weighted score for the first 22 questions of a module.
- * Skips pretest questions (23 and 24).
+ * Calculates raw weighted score for a module.
  */
-export function calculateModuleWeightedScore(questions: any[], answers: Record<number, string>, freeText: Record<number, string>): number {
+export function calculateModuleWeightedScore(questions: any[], answers: Record<number, string>, freeText: Record<number, string>, moduleCount: number): number {
   let score = 0;
-  // Scored questions are standard the first 22
-  for (let i = 0; i < Math.min(questions.length, 22); i++) {
+  for (let i = 0; i < Math.min(questions.length, moduleCount); i++) {
     const q = questions[i];
     const userAns = (answers[i] || freeText[i] || "").trim().toLowerCase();
-    const correctAns = (q.correct_answer || "").trim().toLowerCase();
+    const correctAnsRaw = (q.correct_answer || "").trim().toLowerCase();
 
-    if (userAns === correctAns && userAns !== "") {
+    if (!userAns || !correctAnsRaw) continue;
+
+    let isCorrect = false;
+
+    // If it's a multiple choice question
+    if (q.options && q.options.length > 0) {
+      const userIdx = ['a', 'b', 'c', 'd'].indexOf(userAns);
+      const userOptText = userIdx >= 0 ? (q.options[userIdx] || "").trim().toLowerCase() : "";
+
+      if (
+        userAns === correctAnsRaw ||
+        correctAnsRaw === `choice ${userAns}` ||
+        correctAnsRaw === `option ${userAns}` ||
+        (userOptText && userOptText === correctAnsRaw)
+      ) {
+        isCorrect = true;
+      }
+    } else {
+      // Free text math
+      if (userAns === correctAnsRaw) isCorrect = true;
+    }
+
+    if (isCorrect) {
       const difficulty = (q.difficulty || "Medium") as keyof typeof DIFFICULTY_WEIGHTS;
       score += DIFFICULTY_WEIGHTS[difficulty] || 1.5;
     }
@@ -52,7 +72,7 @@ export function calculateModuleWeightedScore(questions: any[], answers: Record<n
 export function calculateSectionScaledScore(m1Raw: number, m2Raw: number, isHigherPath: boolean): number {
   const totalRaw = m1Raw + m2Raw;
   let finalScore: number;
-  
+
   if (isHigherPath) {
     // Scaling for Higher Path: 200 to 800
     const maxTotalCombined = MAX_M1_RAW_WEIGHTED + MAX_M2_HIGHER_RAW_WEIGHTED;

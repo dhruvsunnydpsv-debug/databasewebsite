@@ -107,7 +107,7 @@ async function fetchQuestions(stage: Stage, module1Score?: number, seenIds?: Set
                 try {
                     const controller = new AbortController();
                     const timeoutId = setTimeout(() => controller.abort(), 2000);
-                    const url = `${supabaseUrl}/rest/v1/sat_question_bank?module=eq.${modString}&domain=eq.${domain}&difficulty=eq.${tier.difficulty}&limit=50`;
+                    const url = `${supabaseUrl}/rest/v1/sat_question_bank?module=eq.${modString}&domain=eq.${domain}&difficulty=eq.${tier.difficulty}&limit=400`;
                     const res = await fetch(url, {
                         headers: { "apikey": supabaseKey, "Authorization": `Bearer ${supabaseKey}` },
                         signal: controller.signal,
@@ -211,13 +211,33 @@ export default function BluebookSession() {
         let correctRaw = 0;
         for (let i = 0; i < cfg.count; i++) {
             const q = questions[i];
-            const ans = q.options ? answers[i] : freeText[i];
-            if (ans && ans.trim().toLowerCase() === q.correct_answer?.trim().toLowerCase()) {
-                correctRaw++;
+            const ansLetter = (q.options ? answers[i] : freeText[i] || "").trim().toLowerCase();
+            const dbAns = (q.correct_answer || "").trim().toLowerCase();
+
+            if (!ansLetter || !dbAns) continue;
+
+            let isCorrect = false;
+
+            if (q.options && q.options.length > 0) {
+                const userIdx = ['a', 'b', 'c', 'd'].indexOf(ansLetter);
+                const optText = userIdx >= 0 ? (q.options[userIdx] || "").trim().toLowerCase() : "";
+
+                if (
+                    ansLetter === dbAns ||
+                    dbAns === `choice ${ansLetter}` ||
+                    dbAns === `option ${ansLetter}` ||
+                    (optText && optText === dbAns)
+                ) {
+                    isCorrect = true;
+                }
+            } else {
+                if (ansLetter === dbAns) isCorrect = true;
             }
+
+            if (isCorrect) correctRaw++;
         }
 
-        const weighted = calculateModuleWeightedScore(questions, answers, freeText);
+        const weighted = calculateModuleWeightedScore(questions, answers, freeText, cfg.count);
         setModuleCorrectCounts(prev => ({ ...prev, [stage]: correctRaw }));
         setModuleWeightedScores(prev => ({ ...prev, [stage]: weighted }));
 
@@ -311,7 +331,7 @@ export default function BluebookSession() {
     const cfg = STAGE_CONFIG[stage];
 
     return (
-        <div className="h-screen w-screen flex flex-col bg-white overflow-hidden font-sans text-black">
+        <div className="h-screen w-screen flex flex-col bg-white overflow-hidden font-sans text-black select-none">
 
             {/* 1. BLUEBOOK HEADER (Dark Slate) */}
             <header className="h-14 bg-[#1E2532] text-white flex justify-between items-center px-6 shrink-0 relative z-20">
@@ -351,7 +371,7 @@ export default function BluebookSession() {
 
                 {/* Left Pane: Passage (Always visible in Bluebook) */}
                 <div className="w-1/2 p-10 overflow-y-auto border-r border-gray-300">
-                    <div className="text-lg leading-relaxed text-gray-900 border-l-4 border-gray-800 pl-4 font-serif">
+                    <div className="text-lg leading-relaxed text-gray-900 border-l-4 border-gray-800 pl-4 font-serif select-text">
                         {currentQ.rationale || currentQ.raw_original_text || "Read the following text and answer the question."}
                     </div>
                 </div>
@@ -363,7 +383,7 @@ export default function BluebookSession() {
                     </div>
 
                     {!currentQ.is_placeholder && (
-                        <div className="text-xl mb-8 font-medium leading-snug">{currentQ.question_text}</div>
+                        <div className="text-xl mb-8 font-medium leading-snug select-text">{currentQ.question_text}</div>
                     )}
 
                     {currentQ.is_placeholder ? (
@@ -383,7 +403,7 @@ export default function BluebookSession() {
                                         <div className={`w-8 h-8 rounded-full border flex items-center justify-center font-bold mr-4 shrink-0 transition-colors ${selected ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-500 group-hover:bg-blue-600 group-hover:text-white group-hover:border-blue-600'}`}>
                                             {letter}
                                         </div>
-                                        <span className="text-lg">{opt}</span>
+                                        <span className="text-lg select-text">{opt}</span>
                                     </label>
                                 );
                             })}
@@ -396,7 +416,7 @@ export default function BluebookSession() {
                                 value={freeText[currentIndex] ?? ""}
                                 onChange={e => setFreeText(prev => ({ ...prev, [currentIndex]: e.target.value }))}
                                 placeholder="Enter answer..."
-                                className="px-4 py-3 border-2 border-blue-600 rounded-lg text-lg w-48 outline-none focus:ring-2 focus:ring-blue-500 font-bold"
+                                className="px-4 py-3 border-2 border-blue-600 rounded-lg text-lg w-48 outline-none focus:ring-2 focus:ring-blue-500 font-bold select-text"
                             />
                         </div>
                     )}
