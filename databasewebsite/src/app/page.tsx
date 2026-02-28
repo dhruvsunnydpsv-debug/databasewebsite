@@ -16,7 +16,7 @@ export default function Home() {
     }, []);
 
     return (
-        <div style={{ backgroundColor: '#FBFBF2', minHeight: '100vh', position: 'relative', overflowX: 'hidden' }}>
+        <div className="min-h-screen flex flex-col w-full relative overflow-x-hidden" style={{ backgroundColor: '#FBFBF2' }}>
 
             {/* ── Glassmorphic Navigation ────────────────────────── */}
             <nav style={{
@@ -55,16 +55,7 @@ export default function Home() {
             </nav>
 
             {/* ── Rotating Circle Badge (Top Left) ─────────────── */}
-            <div style={{
-                position: 'absolute',
-                top: '6rem',
-                left: '2.5rem',
-                width: '130px',
-                height: '130px',
-                zIndex: 5,
-                pointerEvents: 'none',
-                opacity: 0.8
-            }}>
+            <div className="absolute top-24 left-10 z-[5] opacity-80 pointer-events-none hidden md:block">
                 <svg viewBox="0 0 130 130" width="130" height="130">
                     <defs>
                         <path id="circle-path" d="M 65,65 m -50,0 a 50,50 0 1,1 100,0 a 50,50 0 1,1 -100,0" />
@@ -82,68 +73,53 @@ export default function Home() {
             </div>
 
             {/* ── Background Soft Glows ────────────────────────── */}
-            <div style={{
-                position: 'absolute', top: '-10%', left: '50%', transform: 'translateX(-50%)',
-                width: '80vw', height: '60vh',
+            <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[80vw] h-[60vh] pointer-events-none z-0" style={{
                 background: 'radial-gradient(ellipse at top, rgba(230,213,248,0.4) 0%, rgba(251,251,242,0) 70%)',
-                pointerEvents: 'none', zIndex: 0
             }} />
 
             {/* ── Hero Section ──────────────────────────────────── */}
-            <section style={{ maxWidth: '1000px', margin: '0 auto', padding: '12rem 1.5rem 6rem', textAlign: 'center', position: 'relative', zIndex: 10 }}>
+            <section className="flex flex-col items-center justify-center text-center relative z-10 w-full mx-auto pb-24 pt-48 px-6 gap-8" style={{ maxWidth: '1000px' }}>
 
                 {/* Kicker */}
-                <div style={{
-                    display: 'inline-block',
-                    padding: '0.4rem 1rem',
-                    border: '1px solid rgba(13,13,13,0.1)',
-                    borderRadius: '9999px',
-                    backgroundColor: 'rgba(255,255,255,0.5)',
+                <div className="inline-block px-4 py-1.5 border border-black/10 rounded-full bg-white/50 backdrop-blur-sm" style={{
                     fontFamily: "'Inter', sans-serif", fontSize: '0.7rem', fontWeight: 600, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#555',
-                    marginBottom: '2rem',
-                    backdropFilter: 'blur(4px)'
                 }}>
                     The Gold Standard in Digital SAT Preparation
                 </div>
 
                 {/* Main Headline */}
-                <h1 style={{
+                <h1 className="w-full" style={{
                     fontFamily: "'Playfair Display', serif",
                     fontSize: 'clamp(3.5rem, 8vw, 7rem)',
                     fontWeight: 900,
                     lineHeight: 1.05,
                     letterSpacing: '-0.03em',
                     color: '#0D0D0D',
-                    marginBottom: '2.5rem',
                 }}>
                     Stop guessing.<br />
                     <span style={{ fontStyle: 'italic', color: '#3A3A35' }}>Just practice.</span>
                 </h1>
 
                 {/* Sub-headline */}
-                <p style={{
+                <p className="max-w-2xl px-4" style={{
                     fontFamily: "'Inter', sans-serif",
                     fontSize: '1.25rem',
                     lineHeight: 1.6,
                     color: '#555550',
-                    maxWidth: '650px',
-                    margin: '0 auto 3.5rem',
                     fontWeight: 400
                 }}>
                     Access a proprietary database of 10,000+ hand-crafted Digital SAT questions. Expertly curated and perfectly calibrated to official College Board difficulty.
                 </p>
 
                 {/* CTAs */}
-                <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+                <div className="flex gap-4 justify-center flex-wrap mt-4">
                     <Link
                         href="/test/session"
+                        className="inline-flex items-center px-10 py-4 rounded-full border border-black cursor-pointer text-black"
                         style={{
-                            display: 'inline-flex', alignItems: 'center',
-                            backgroundColor: '#E6D5F8', color: '#0D0D0D',
-                            border: '1px solid #0D0D0D', borderRadius: '9999px',
-                            padding: '1rem 2.5rem',
+                            backgroundColor: '#E6D5F8',
                             fontFamily: "'Inter', sans-serif", fontSize: '1rem', fontWeight: 600,
-                            textDecoration: 'none', cursor: 'pointer',
+                            textDecoration: 'none',
                             boxShadow: '0 4px 14px rgba(230,213,248,0.4), inset 0 -2px 0 rgba(0,0,0,0.1)',
                             transition: 'all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
                         }}
