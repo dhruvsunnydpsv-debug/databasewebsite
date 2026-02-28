@@ -1,0 +1,1 @@
+const url = process.env.NEXT_PUBLIC_SUPABASE_URL + "/rest/v1/sat_question_bank?limit=1"; fetch(url, { headers: { apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY } }).then(res => res.json().then(j => console.log(j)));

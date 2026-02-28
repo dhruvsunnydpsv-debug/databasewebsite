@@ -2,9 +2,9 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
+import { calculateModuleWeightedScore, calculateSectionScaledScore } from "@/lib/scoring-logic";
 
 const DesmosCalculator = dynamic(() => import("../DesmosCalculator"), { ssr: false });
-import { calculateModuleWeightedScore, calculateSectionScaledScore } from "@/lib/scoring-logic";
 
 // ─── Types ────────────────────────────────────────────────────
 interface Question {
@@ -12,38 +12,37 @@ interface Question {
     question_text: string;
     options: string[] | null;
     correct_answer: string;
+    raw_original_text?: string;
     rationale?: string;
     domain?: string;
     difficulty?: string;
     module?: string;
-    is_placeholder?: boolean;  // true when bank is empty for this bucket
+    is_placeholder?: boolean;
 }
 
 type Stage = 1 | 2 | 3 | 4;
 type Phase = "loading" | "testing" | "between" | "complete";
 
 const STAGE_CONFIG = {
-    1: { label: "Reading & Writing — Module 1", count: 24, seconds: 32 * 60, subject: "rw" },
-    2: { label: "Reading & Writing — Module 2", count: 24, seconds: 32 * 60, subject: "rw" },
-    3: { label: "Math — Module 1", count: 24, seconds: 35 * 60, subject: "math" },
-    4: { label: "Math — Module 2", count: 24, seconds: 35 * 60, subject: "math" },
+    1: { label: "Reading & Writing — Module 1", count: 27, seconds: 32 * 60, subject: "rw" },
+    2: { label: "Reading & Writing — Module 2", count: 27, seconds: 32 * 60, subject: "rw" },
+    3: { label: "Math — Module 1", count: 22, seconds: 35 * 60, subject: "math" },
+    4: { label: "Math — Module 2", count: 22, seconds: 35 * 60, subject: "math" },
 } as const;
 
-// ─── Placeholder generator (used when DB bucket is empty) ───
-function makePlaceholder(moduleFilter: string, difficulty: string, domain: string, index: number): Question {
+function makePlaceholder(mod: string, difficulty: string, domain: string, index: number): Question {
     return {
-        id: `placeholder-${moduleFilter}-${domain}-${difficulty}-${index}`,
+        id: `placeholder-${mod}-${domain}-${difficulty}-${index}`,
         question_text: "",
         options: null,
         correct_answer: "",
         domain,
         difficulty,
-        module: moduleFilter,
+        module: mod,
         is_placeholder: true,
     };
 }
 
-// ─── Fisher-Yates Shuffle ──────────────────────────────────────
 function shuffleArray<T>(array: T[]): T[] {
     const arr = [...array];
     for (let i = arr.length - 1; i > 0; i--) {
@@ -60,34 +59,28 @@ async function fetchQuestions(stage: Stage, module1Score?: number, seenIds?: Set
 
     const cfg = STAGE_CONFIG[stage];
     const isMath = cfg.subject === "math";
-    const moduleFilter = isMath ? "Math" : "Reading_Writing";
+    const modString = isMath ? "Math" : "Reading_Writing";
     const total = cfg.count;
 
-    // Domain distribution for this module
     const mathDomains = ["Heart_of_Algebra", "Advanced_Math", "Problem_Solving_Data", "Geometry_Trigonometry"];
     const rwDomains = ["Information_Ideas", "Craft_Structure", "Expression_Ideas", "Standard_English"];
     const domains = isMath ? mathDomains : rwDomains;
 
-    // Difficulty distribution
     let tiers: { difficulty: string; count: number }[];
     if (stage === 1 || stage === 3) {
-        // Module 1: 30% Easy, 40% Medium, 30% Hard
         tiers = [
             { difficulty: "Easy", count: Math.floor(total * 0.30) },
             { difficulty: "Medium", count: Math.floor(total * 0.40) },
             { difficulty: "Hard", count: total - Math.floor(total * 0.30) - Math.floor(total * 0.40) },
         ];
     } else {
-        // Module 2 Routing: Accuracy check (>= 65%)
         const isHigherPath = (module1Score ?? 0) >= 65;
         if (isHigherPath) {
-            // Higher Routing: Strictly Medium and Hard (0% Easy)
             tiers = [
                 { difficulty: "Medium", count: Math.floor(total * 0.40) },
                 { difficulty: "Hard", count: total - Math.floor(total * 0.40) },
             ];
         } else {
-            // Lower Routing: Strictly Easy and Medium (0% Hard)
             tiers = [
                 { difficulty: "Easy", count: Math.floor(total * 0.60) },
                 { difficulty: "Medium", count: total - Math.floor(total * 0.60) },
@@ -100,11 +93,8 @@ async function fetchQuestions(stage: Stage, module1Score?: number, seenIds?: Set
 
     for (const tier of tiers) {
         if (tier.count <= 0) continue;
-
         const perDomain = Math.ceil(tier.count / domains.length);
         let tierRemaining = tier.count;
-
-        // Collect fetch promises for this tier to run in parallel
         const tierPromises: Promise<Question[]>[] = [];
 
         for (const domain of domains) {
@@ -116,9 +106,8 @@ async function fetchQuestions(stage: Stage, module1Score?: number, seenIds?: Set
                 const fetched: Question[] = [];
                 try {
                     const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), 2000); // 2s strict timeout
-                    // Fetch a larger pool since we can't use order=random() in PostgREST
-                    const url = `${supabaseUrl}/rest/v1/sat_question_bank?section=eq.${moduleFilter}&domain=eq.${domain}&difficulty=eq.${tier.difficulty}&limit=50`;
+                    const timeoutId = setTimeout(() => controller.abort(), 2000);
+                    const url = `${supabaseUrl}/rest/v1/sat_question_bank?section=eq.${modString}&domain=eq.${domain}&difficulty=eq.${tier.difficulty}&limit=50`;
                     const res = await fetch(url, {
                         headers: { "apikey": supabaseKey, "Authorization": `Bearer ${supabaseKey}` },
                         signal: controller.signal,
@@ -126,73 +115,61 @@ async function fetchQuestions(stage: Stage, module1Score?: number, seenIds?: Set
                     clearTimeout(timeoutId);
                     if (res.ok) {
                         const rows: Question[] = await res.json();
-                        // Deduplication: filter out any ids we've already seen in Module 1
-                        const freshRows = seenIds ? rows.filter(r => !seenIds.has(r.id)) : rows;
-                        // Shuffle the fetched pool to get a random selection
+                        const freshRows = seenIds ? rows.filter((r: Question) => !seenIds.has(r.id)) : rows;
                         const shuffledRows = shuffleArray(freshRows);
                         fetched.push(...shuffledRows.slice(0, fetchCount));
                     }
                 } catch {
-                    // Ignore error, will fill with placeholders
+                    // Ignore error
                 }
-
-                // Fill any missing spots with placeholders
                 while (fetched.length < fetchCount) {
-                    fetched.push(makePlaceholder(moduleFilter, tier.difficulty, domain, placeholderIdx++));
+                    fetched.push(makePlaceholder(modString, tier.difficulty, domain, placeholderIdx++));
                 }
                 return fetched;
             })());
         }
 
-        // Wait for all domain fetches in this tier to complete
         const tierResults = await Promise.all(tierPromises);
         for (const tr of tierResults) {
             results.push(...tr);
         }
     }
 
-    // Final safety net: always return exactly `total` questions
     while (results.length < total) {
-        results.push(makePlaceholder(moduleFilter, "Medium", "General", placeholderIdx++));
+        results.push(makePlaceholder(modString, "Medium", "General", placeholderIdx++));
     }
-    // Shuffle the final assembled test to mix difficulties and domains
     return shuffleArray(results).slice(0, total);
 }
 
-// ─── Timer Display ────────────────────────────────────────────
 function formatTime(seconds: number) {
     const m = Math.floor(seconds / 60).toString().padStart(2, "0");
     const s = (seconds % 60).toString().padStart(2, "0");
     return `${m}:${s}`;
 }
 
-// ─── Main Component ───────────────────────────────────────────
-export default function TestSessionPage() {
+export default function BluebookSession() {
     const [stage, setStage] = useState<Stage>(1);
     const [phase, setPhase] = useState<Phase>("loading");
     const [questions, setQuestions] = useState<Question[]>([]);
     const [answers, setAnswers] = useState<Record<number, string>>({});
     const [freeText, setFreeText] = useState<Record<number, string>>({});
     const [marked, setMarked] = useState<Set<number>>(new Set());
-    const [currentIdx, setCurrentIdx] = useState(0);
+    const [currentIndex, setCurrentIndex] = useState(0);
     const [timerSec, setTimerSec] = useState(STAGE_CONFIG[1].seconds);
     const [timerHidden, setTimerHidden] = useState(false);
     const [desmosOpen, setDesmosOpen] = useState(false);
     const [seenIds, setSeenIds] = useState<Set<string>>(new Set());
 
-    // Scoring engine
     const [moduleCorrectCounts, setModuleCorrectCounts] = useState<Record<number, number>>({});
     const [moduleWeightedScores, setModuleWeightedScores] = useState<Record<number, number>>({});
-
     const [finalRWScore, setFinalRWScore] = useState(0);
     const [finalMathScore, setFinalMathScore] = useState(0);
-    const [finalOverallScore, setFinalOverallScore] = useState(0);
 
     const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
     const loadStage = useCallback(async (s: Stage, routingVal?: number, currentSeenIds?: Set<string>) => {
         setPhase("loading");
-        setCurrentIdx(0);
+        setCurrentIndex(0);
         setAnswers({});
         setFreeText({});
         setMarked(new Set());
@@ -200,23 +177,20 @@ export default function TestSessionPage() {
             const qs = await fetchQuestions(s, routingVal, currentSeenIds);
             setQuestions(qs);
         } catch {
-            // Absolute worst-case: fill with placeholders so it never stays stuck
             const cfg = STAGE_CONFIG[s];
-            const isMath = cfg.subject === "math";
-            const mod = isMath ? "Math" : "Reading_Writing";
+            const mod = cfg.subject === "math" ? "Math" : "Reading_Writing";
             const fallback: Question[] = Array.from({ length: cfg.count }, (_, i) =>
                 makePlaceholder(mod, "Medium", "General", i)
             );
             setQuestions(fallback);
         } finally {
             setTimerSec(STAGE_CONFIG[s].seconds);
-            setPhase("testing");  // ALWAYS advance — never stuck on loading
+            setPhase("testing");
         }
     }, []);
 
-    useEffect(() => { loadStage(1, undefined, new Set()); }, []);
+    useEffect(() => { loadStage(1, undefined, new Set()); }, [loadStage]);
 
-    // ─── Countdown Timer ─────────────────────────────────────
     useEffect(() => {
         if (phase !== "testing") { if (timerRef.current) clearInterval(timerRef.current); return; }
         timerRef.current = setInterval(() => {
@@ -228,13 +202,14 @@ export default function TestSessionPage() {
         return () => { if (timerRef.current) clearInterval(timerRef.current); };
     }, [phase]);
 
-    // ─── Module Submit Logic ──────────────────────────────────
     const handleModuleEnd = () => {
         if (timerRef.current) clearInterval(timerRef.current);
 
-        // 1. Grade scored questions (indices 0-21)
+        const cfg = STAGE_CONFIG[stage];
+        // The College Board uses unscored operational questions (usually 2 per module).
+        // For our simplified grading, we grade all answered questions but weight them.
         let correctRaw = 0;
-        for (let i = 0; i < 22; i++) {
+        for (let i = 0; i < cfg.count; i++) {
             const q = questions[i];
             const ans = q.options ? answers[i] : freeText[i];
             if (ans && ans.trim().toLowerCase() === q.correct_answer?.trim().toLowerCase()) {
@@ -243,31 +218,22 @@ export default function TestSessionPage() {
         }
 
         const weighted = calculateModuleWeightedScore(questions, answers, freeText);
-
-        // Use functional state updates to ensure we have the absolute latest counts
         setModuleCorrectCounts(prev => ({ ...prev, [stage]: correctRaw }));
         setModuleWeightedScores(prev => ({ ...prev, [stage]: weighted }));
 
         if (stage === 1 || stage === 3) {
             setPhase("between");
         } else if (stage === 2) {
-            // End of Reading & Writing Section
             const m1Correct = moduleCorrectCounts[1] || 0;
-            const isHigher = m1Correct >= 15;
+            const isHigher = (m1Correct / STAGE_CONFIG[1].count) >= 0.65;
             const scaled = calculateSectionScaledScore(moduleWeightedScores[1] || 0, weighted, isHigher);
             setFinalRWScore(scaled);
             setPhase("between");
         } else if (stage === 4) {
-            // End of Math Section: GO STRAIGHT TO RESULTS
             const m3Correct = moduleCorrectCounts[3] || 0;
-            const isHigher = m3Correct >= 15;
+            const isHigher = (m3Correct / STAGE_CONFIG[3].count) >= 0.65;
             const mathScaled = calculateSectionScaledScore(moduleWeightedScores[3] || 0, weighted, isHigher);
-
             setFinalMathScore(mathScaled);
-            setFinalOverallScore(finalRWScore + mathScaled);
-
-            // We set the phase to complete last to give other states a tiny window 
-            // but we'll also handle the calculation in the render for safety.
             setPhase("complete");
         }
     };
@@ -275,10 +241,9 @@ export default function TestSessionPage() {
     const handleNextModule = () => {
         const next = (stage + 1) as Stage;
         if (next > 4) { setPhase("complete"); return; }
-        const accuracyPct = Math.round(((moduleCorrectCounts[stage] || 0) / 22) * 100);
+        const accuracyPct = Math.round(((moduleCorrectCounts[stage] || 0) / STAGE_CONFIG[stage].count) * 100);
         setStage(next);
 
-        // Track the IDs used in the current module to prevent duplicates in the next
         const newSeen = new Set(seenIds);
         questions.forEach((q: Question) => {
             if (!q.is_placeholder) newSeen.add(q.id);
@@ -288,333 +253,220 @@ export default function TestSessionPage() {
         loadStage(next, accuracyPct, newSeen);
     };
 
-    const q = questions[currentIdx];
-    const isLastQ = currentIdx === questions.length - 1;
-    const isMathStage = stage === 3 || stage === 4;
-    const cfg = STAGE_CONFIG[stage];
+    if (phase === "loading") {
+        return <div className="h-screen w-screen flex items-center justify-center bg-white text-black text-xl font-sans">Loading Secure Test Environment...</div>;
+    }
 
-    // ─── LOADING SCREEN ──────────────────────────────────────
-    if (phase === "loading") return (
-        <div style={{ position: "fixed", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", backgroundColor: "#0f172a", color: "#e2e8f0", fontFamily: "'Inter', sans-serif", zIndex: 9999 }}>
-            <div style={{ fontSize: "2rem", marginBottom: "1rem", animation: "pulse 1.5s ease-in-out infinite" }}>●</div>
-            <p style={{ fontSize: "0.9rem", color: "#94a3b8" }}>Preparing your test…</p>
-            <style>{`@keyframes pulse { 0%,100%{opacity:.3} 50%{opacity:1} }`}</style>
-        </div>
-    );
-
-    // ─── BETWEEN MODULES SCREEN ──────────────────────────────
-    if (phase === "between") return (
-        <div style={{ height: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", backgroundColor: "#0f172a", color: "#e2e8f0", fontFamily: "'Inter', sans-serif", textAlign: "center", padding: "2rem" }}>
-            <p style={{ fontSize: "0.7rem", letterSpacing: "0.15em", textTransform: "uppercase", color: "#64748b", marginBottom: "0.75rem" }}>Section Complete</p>
-            <h2 style={{ fontSize: "2rem", fontWeight: 700, marginBottom: "1rem" }}>{cfg.label}</h2>
-            <p style={{ color: "#94a3b8", marginBottom: "0.5rem", fontSize: "0.9rem" }}>Questions Answered: <strong style={{ color: "#e2e8f0" }}>{Object.keys(answers).length + Object.keys(freeText).length} / 24</strong></p>
-            {stage < 4 && <p style={{ color: "#64748b", marginBottom: "2rem", fontSize: "0.85rem" }}>
-                {stage === 1 ? "Module 2 (Reading & Writing)" : stage === 2 ? "Module 1 (Math)" : "Module 2 (Math)"} is coming up.
-                {(stage === 1 || stage === 3) && <span style={{ color: (moduleCorrectCounts[stage] || 0) >= 15 ? "#4ade80" : "#f87171", marginLeft: "0.5rem" }}>({(moduleCorrectCounts[stage] || 0) >= 15 ? "Higher Tier" : "Standard Tier"} enabled)</span>}
-            </p>}
-            {stage === 4 && <p style={{ color: "#64748b", marginBottom: "2rem", fontSize: "0.85rem" }}>You have finished the final module. Your scores are being processed.</p>}
-            {stage < 4 ? (
-                <button onClick={handleNextModule} style={{ backgroundColor: "#3b82f6", color: "#fff", border: "none", borderRadius: "8px", padding: "0.8rem 2rem", fontSize: "0.95rem", fontWeight: 600, cursor: "pointer" }}>
-                    Begin Next Module →
-                </button>
-            ) : (
-                <button onClick={() => setPhase("complete")} style={{ backgroundColor: "#4ade80", color: "#0f172a", border: "none", borderRadius: "8px", padding: "0.8rem 2rem", fontSize: "0.95rem", fontWeight: 600, cursor: "pointer" }}>
-                    View Results →
-                </button>
-            )}
-        </div>
-    );
-
-    // ─── COMPLETE SCREEN ─────────────────────────────────────
-    if (phase === "complete") {
-        const totalCorrect = (moduleCorrectCounts[1] || 0) + (moduleCorrectCounts[2] || 0) + (moduleCorrectCounts[3] || 0) + (moduleCorrectCounts[4] || 0);
+    if (phase === "between") {
+        const cfg = STAGE_CONFIG[stage];
         return (
-            <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", backgroundColor: "#0f172a", color: "#e2e8f0", fontFamily: "'Inter', sans-serif", textAlign: "center", padding: "2rem" }}>
-                <p style={{ fontSize: "0.7rem", letterSpacing: "0.15em", textTransform: "uppercase", color: "#64748b", marginBottom: "0.75rem" }}>Practice Performance Dashboard</p>
-                <h2 style={{ fontSize: "6.5rem", fontWeight: 900, marginBottom: "0", lineHeight: 1, letterSpacing: "-0.02em" }}>{finalRWScore + finalMathScore}</h2>
-                <p style={{ fontSize: "0.8rem", color: "#94a3b8", marginBottom: "1rem", textTransform: "uppercase", letterSpacing: "0.1em" }}>Total Scaled Score (400–1600)</p>
-                <p style={{ fontSize: "0.85rem", color: "#64748b", marginBottom: "3rem" }}><strong>{totalCorrect}</strong> out of 88 questions correct (Excl. pretest)</p>
+            <div className="h-screen w-screen flex flex-col items-center justify-center bg-white text-black font-sans text-center p-8">
+                <p className="text-sm tracking-widest uppercase text-gray-500 mb-3">Section Complete</p>
+                <h2 className="text-3xl font-bold mb-4">{cfg.label}</h2>
+                <p className="text-gray-600 mb-8">Take a moment to rest. The next module will adjust to your performance.</p>
+                {stage < 4 ? (
+                    <button onClick={handleNextModule} className="bg-blue-600 text-white border-none rounded-md px-8 py-3 text-lg font-bold cursor-pointer hover:bg-blue-700">
+                        Begin Next Module →
+                    </button>
+                ) : (
+                    <button onClick={() => setPhase("complete")} className="bg-green-500 text-white border-none rounded-md px-8 py-3 text-lg font-bold cursor-pointer hover:bg-green-600">
+                        View Results →
+                    </button>
+                )}
+            </div>
+        );
+    }
 
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2rem", marginBottom: "3rem", width: "100%", maxWidth: "550px" }}>
-                    <div style={{ padding: "1.75rem", backgroundColor: "#1e293b", borderRadius: "14px", border: "1px solid #334155", position: "relative", overflow: "hidden" }}>
-                        <div style={{ position: "absolute", top: 0, left: 0, width: "4px", height: "100%", backgroundColor: "#3b82f6" }}></div>
-                        <p style={{ fontSize: "2.25rem", fontWeight: 800, margin: 0 }}>{finalRWScore}</p>
-                        <p style={{ fontSize: "0.7rem", color: "#94a3b8", textTransform: "uppercase", fontWeight: 600 }}>Reading & Writing</p>
+    if (phase === "complete") {
+        return (
+            <div className="min-h-screen flex flex-col items-center justify-center bg-white text-black font-sans text-center p-8">
+                <p className="text-xs tracking-widest uppercase text-gray-500 mb-3">Practice Performance</p>
+                <h2 className="text-8xl font-black mb-0 leading-none tracking-tighter">{finalRWScore + finalMathScore}</h2>
+                <p className="text-sm text-gray-500 mb-8 uppercase tracking-widest">Total Scaled Score (400–1600)</p>
+
+                <div className="grid grid-cols-2 gap-8 mb-12 w-full max-w-xl">
+                    <div className="p-8 bg-gray-50 rounded-xl border border-gray-200 border-l-4 border-l-blue-500 shadow-sm">
+                        <p className="text-4xl font-extrabold m-0">{finalRWScore}</p>
+                        <p className="text-xs text-gray-500 uppercase font-bold mt-2">Reading & Writing</p>
                     </div>
-                    <div style={{ padding: "1.75rem", backgroundColor: "#1e293b", borderRadius: "14px", border: "1px solid #334155", position: "relative", overflow: "hidden" }}>
-                        <div style={{ position: "absolute", top: 0, left: 0, width: "4px", height: "100%", backgroundColor: "#ef4444" }}></div>
-                        <p style={{ fontSize: "2.25rem", fontWeight: 800, margin: 0 }}>{finalMathScore}</p>
-                        <p style={{ fontSize: "0.7rem", color: "#94a3b8", textTransform: "uppercase", fontWeight: 600 }}>Mathematics</p>
+                    <div className="p-8 bg-gray-50 rounded-xl border border-gray-200 border-l-4 border-l-red-500 shadow-sm">
+                        <p className="text-4xl font-extrabold m-0">{finalMathScore}</p>
+                        <p className="text-xs text-gray-500 uppercase font-bold mt-2">Mathematics</p>
                     </div>
                 </div>
 
-                <div style={{ maxWidth: "600px", backgroundColor: "rgba(255,255,255,0.03)", padding: "1rem", borderRadius: "6px", border: "1px dashed #334155", marginBottom: "2rem" }}>
-                    <p style={{ fontSize: "0.72rem", color: "#64748b", lineHeight: 1.5, textAlign: "left" }}>
-                        <strong>Note:</strong> Difficulty mix affects points (Easy: 1.0, Medium: 1.5, Hard: 2.0).
-                        Scaling adjusts based on the adaptive path taken (Higher vs Lower).
-                        This implementation follows a research-based multistage adaptive model and does not claim to match the College Board's proprietary algorithm.
-                    </p>
-                </div>
-
-                <a href="/" style={{ backgroundColor: "#E6D5F8", color: "#0D0D0D", border: "none", borderRadius: "9999px", padding: "0.8rem 2.5rem", fontSize: "0.95rem", fontWeight: 600, cursor: "pointer", textDecoration: "none" }}>
+                <a href="/" className="bg-[#E6D5F8] text-black border border-black rounded-full px-10 py-3 text-base font-bold cursor-pointer no-underline hover:bg-[#D4BFEF] transition-colors">
                     Return to Home
                 </a>
             </div>
         );
     }
 
-    // ─── MAIN TESTING UI ─────────────────────────────────────
-    return (
-        <div style={{ height: "100vh", display: "flex", flexDirection: "column", backgroundColor: "#f8fafc", fontFamily: "'Inter', Arial, sans-serif", overflow: "hidden" }}>
+    if (questions.length === 0) {
+        return <div className="h-screen w-screen flex items-center justify-center bg-white text-red-600 text-xl font-bold font-sans">Error: Question Bank Empty or 400 Bad Request.</div>;
+    }
 
-            {/* ══════════ HEADER ══════════ */}
-            <header style={{
-                height: "48px", backgroundColor: "#1a1a2e", color: "#e2e8f0",
-                display: "flex", alignItems: "center", justifyContent: "space-between",
-                padding: "0 1.25rem", flexShrink: 0, zIndex: 10,
-                borderBottom: "1px solid #2d3748",
-            }}>
-                {/* Left: Section label & Directions */}
-                <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
-                    <details style={{ position: "relative" }}>
-                        <summary style={{ cursor: "pointer", fontSize: "0.78rem", fontWeight: 600, letterSpacing: "0.02em", color: "#e2e8f0", listStyle: "none", padding: "0.25rem 0.6rem", borderRadius: "4px", border: "1px solid #4a5568" }}>
-                            Directions ▾
-                        </summary>
-                        <div style={{ position: "absolute", top: "100%", left: 0, marginTop: "4px", backgroundColor: "#1a1a2e", border: "1px solid #4a5568", borderRadius: "6px", padding: "1rem", width: "300px", zIndex: 50, fontSize: "0.78rem", lineHeight: 1.65, color: "#cbd5e0" }}>
-                            For each question, select the best answer from the choices provided. Some questions may have a data or passage context in the left pane. For Student-Produced Responses (SPR), type your answer in the box.
-                        </div>
-                    </details>
-                    <span style={{ fontSize: "0.72rem", color: "#64748b", fontWeight: 500 }}>{cfg.label}</span>
+    const currentQ = questions[currentIndex];
+    const isMathStage = stage === 3 || stage === 4;
+    const cfg = STAGE_CONFIG[stage];
+
+    return (
+        <div className="h-screen w-screen flex flex-col bg-white overflow-hidden font-sans text-black">
+
+            {/* 1. BLUEBOOK HEADER (Dark Slate) */}
+            <header className="h-14 bg-[#1E2532] text-white flex justify-between items-center px-6 shrink-0 relative z-20">
+                <div className="flex items-center space-x-4">
+                    <span className="font-semibold text-sm cursor-pointer">Directions ▼</span>
+                    <span className="text-gray-300 text-sm border-l border-gray-600 pl-4">{cfg.label}</span>
                 </div>
 
-                {/* Center: Timer */}
-                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                <div className="flex items-center space-x-4 absolute left-1/2 transform -translate-x-1/2">
                     {!timerHidden && (
-                        <span style={{
-                            fontFamily: "monospace", fontSize: "1.25rem", fontWeight: 700, letterSpacing: "0.05em",
-                            color: timerSec < 300 ? "#f87171" : "#e2e8f0",
-                            minWidth: "5rem", textAlign: "center",
-                        }}>
-                            {formatTime(timerSec)}
-                        </span>
+                        <span className="text-xl font-bold tracking-widest">{formatTime(timerSec)}</span>
                     )}
-                    <button onClick={() => setTimerHidden(h => !h)} style={{ fontSize: "0.68rem", color: "#94a3b8", background: "none", border: "1px solid #4a5568", borderRadius: "4px", padding: "0.15rem 0.5rem", cursor: "pointer" }}>
+                    <button onClick={() => setTimerHidden(!timerHidden)} className="text-xs text-gray-400 hover:text-white cursor-pointer ml-2">
                         {timerHidden ? "Show" : "Hide"}
                     </button>
                 </div>
 
-                {/* Right: Tools */}
-                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                <div className="flex items-center space-x-4">
                     {isMathStage && (
-                        <button
-                            onClick={() => setDesmosOpen(o => !o)}
-                            title="Calculator"
-                            style={{ background: desmosOpen ? "#3b82f6" : "none", border: "1px solid #4a5568", borderRadius: "6px", color: "#e2e8f0", cursor: "pointer", padding: "0.35rem 0.7rem", fontSize: "0.82rem", display: "flex", alignItems: "center", gap: "0.3rem" }}
-                        >
-                            📊 <span style={{ fontSize: "0.72rem" }}>Calc</span>
-                        </button>
+                        <button onClick={() => setDesmosOpen(!desmosOpen)} className="bg-[#2D3646] hover:bg-[#3A4556] px-3 py-1 rounded text-sm font-medium transition-colors">Calculator</button>
                     )}
-                    <button title="Annotate" style={{ background: "none", border: "1px solid #4a5568", borderRadius: "6px", color: "#e2e8f0", cursor: "pointer", padding: "0.35rem 0.7rem", fontSize: "0.82rem" }}>
-                        ✏️
+                    <button
+                        onClick={() => setMarked(prev => {
+                            const n = new Set(prev);
+                            n.has(currentIndex) ? n.delete(currentIndex) : n.add(currentIndex);
+                            return n;
+                        })}
+                        className={`px-3 py-1 rounded text-sm font-medium transition-colors ${marked.has(currentIndex) ? 'bg-amber-600 hover:bg-amber-700 text-white' : 'bg-[#2D3646] hover:bg-[#3A4556]'}`}
+                    >
+                        {marked.has(currentIndex) ? "🚩 Marked" : "Mark for Review"}
                     </button>
                 </div>
             </header>
 
-            {/* ══════════ CANVAS (50/50) ══════════ */}
-            <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+            {/* 2. SPLIT SCREEN BODY */}
+            <main className="flex-1 flex flex-row overflow-hidden border-b border-gray-300 relative z-10">
 
-                {/* Left Pane — Passage/Context */}
-                <div style={{
-                    width: "50%", height: "100%", overflowY: "auto",
-                    borderRight: "1px solid #e2e8f0", backgroundColor: "#fff",
-                    padding: "2rem 1.75rem",
-                }}>
-                    {q?.rationale ? (
+                {/* Left Pane: Passage (Always visible in Bluebook) */}
+                <div className="w-1/2 p-10 overflow-y-auto border-r border-gray-300">
+                    <div className="text-lg leading-relaxed text-gray-900 border-l-4 border-gray-800 pl-4 font-serif">
+                        {currentQ.rationale || currentQ.raw_original_text || "Read the following text and answer the question."}
+                    </div>
+                </div>
+
+                {/* Right Pane: Question & Options */}
+                <div className="w-1/2 p-10 overflow-y-auto bg-gray-50">
+                    <div className="flex items-center space-x-2 mb-6 text-sm font-bold bg-black text-white w-fit px-3 py-1 rounded">
+                        <span>{currentIndex + 1}</span>
+                    </div>
+
+                    {!currentQ.is_placeholder && (
+                        <div className="text-xl mb-8 font-medium leading-snug">{currentQ.question_text}</div>
+                    )}
+
+                    {currentQ.is_placeholder ? (
+                        <div className="flex flex-col items-center justify-center p-8 bg-red-50 border border-red-200 rounded text-red-700">
+                            <p className="font-bold mb-2">Error: Insufficient Data</p>
+                            <p className="text-sm">Attempted fetching: {currentQ.module} • {currentQ.domain} • {currentQ.difficulty}</p>
+                        </div>
+                    ) : currentQ.options && currentQ.options.length > 0 ? (
+                        <div className="space-y-3">
+                            {currentQ.options?.map((opt: string, idx: number) => {
+                                const letters = ['A', 'B', 'C', 'D'];
+                                const letter = letters[idx];
+                                const selected = answers[currentIndex] === letter;
+                                return (
+                                    <label key={idx} className={`flex items-start p-4 border rounded-lg cursor-pointer transition-colors group ${selected ? 'bg-blue-50 border-blue-600' : 'bg-white border-gray-400 hover:bg-blue-50 hover:border-blue-600'}`}>
+                                        <input type="radio" name="answer" className="hidden" onChange={() => setAnswers(prev => ({ ...prev, [currentIndex]: letter }))} checked={selected} />
+                                        <div className={`w-8 h-8 rounded-full border flex items-center justify-center font-bold mr-4 shrink-0 transition-colors ${selected ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-500 group-hover:bg-blue-600 group-hover:text-white group-hover:border-blue-600'}`}>
+                                            {letter}
+                                        </div>
+                                        <span className="text-lg">{opt}</span>
+                                    </label>
+                                );
+                            })}
+                        </div>
+                    ) : (
                         <div>
-                            <p style={{ fontSize: "0.65rem", fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "#94a3b8", marginBottom: "1rem" }}>Context / Passage</p>
-                            <p style={{ fontFamily: "Georgia, serif", fontSize: "1.05rem", lineHeight: 1.8, color: "#1e293b" }}>{q.rationale}</p>
-                        </div>
-                    ) : (
-                        <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "#cbd5e0" }}>
-                            <div style={{ fontSize: "3rem", marginBottom: "1rem", opacity: 0.5 }}>📄</div>
-                            <p style={{ fontSize: "0.85rem", textAlign: "center" }}>No passage for this question</p>
+                            <p className="text-sm text-gray-500 mb-2 font-bold uppercase tracking-wide">Student-Produced Response</p>
+                            <input
+                                type="text"
+                                value={freeText[currentIndex] ?? ""}
+                                onChange={e => setFreeText(prev => ({ ...prev, [currentIndex]: e.target.value }))}
+                                placeholder="Enter answer..."
+                                className="px-4 py-3 border-2 border-blue-600 rounded-lg text-lg w-48 outline-none focus:ring-2 focus:ring-blue-500 font-bold"
+                            />
                         </div>
                     )}
                 </div>
+            </main>
 
-                {/* Right Pane — Question */}
-                <div style={{
-                    width: "50%", height: "100%", overflowY: "auto",
-                    backgroundColor: "#fff", padding: "2rem 1.75rem",
-                }}>
-                    {q ? (
-                        <>
-                            {/* Question number badge */}
-                            <p style={{ fontSize: "0.65rem", fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "#94a3b8", marginBottom: "0.75rem" }}>
-                                {currentIdx + 1}
-                            </p>
-
-                            {/* Question text (hidden if placeholder) */}
-                            {!q.is_placeholder && (
-                                <p style={{ fontSize: "1rem", lineHeight: 1.75, color: "#1e293b", marginBottom: "1.75rem", fontFamily: "Arial, 'Inter', sans-serif" }}>
-                                    {q.question_text}
-                                </p>
-                            )}
-
-                            {/* Options, SPR, or Placeholder */}
-                            {q.is_placeholder ? (
-                                // ── Clinical Error State (Missing Data) ──────────
-                                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "250px", textAlign: "center", padding: "1.5rem 1rem", fontFamily: "'Inter', Arial, sans-serif" }}>
-                                    <p style={{ fontSize: "1.1rem", fontWeight: 700, color: "#334155", marginBottom: "0.75rem" }}>
-                                        Error: Insufficient Question Bank Data.
-                                    </p>
-                                    <p style={{ fontSize: "0.9rem", color: "#64748b", lineHeight: 1.6 }}>
-                                        Attempted to fetch:<br />
-                                        <span style={{ fontWeight: 600, color: "#475569" }}>
-                                            {q.module?.replace(/_/g, " ")} • {q.domain?.replace(/_/g, " ")} • {q.difficulty}
-                                        </span>
-                                    </p>
-                                </div>
-                            ) : q.options && q.options.length > 0 ? (
-                                <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem" }}>
-                                    {q.options?.map((opt: string, i: number) => {
-                                        const letter = String.fromCharCode(65 + i);
-                                        const selected = answers[currentIdx] === letter;
-                                        return (
-                                            <button
-                                                key={i}
-                                                onClick={() => setAnswers(prev => ({ ...prev, [currentIdx]: letter }))}
-                                                style={{
-                                                    display: "flex", alignItems: "flex-start", gap: "0.75rem",
-                                                    padding: "0.75rem 1rem", textAlign: "left",
-                                                    border: selected ? "2px solid #3b82f6" : "1.5px solid #e2e8f0",
-                                                    borderRadius: "8px",
-                                                    backgroundColor: selected ? "#eff6ff" : "#fff",
-                                                    cursor: "pointer", transition: "all 0.1s ease",
-                                                    fontFamily: "Arial, 'Inter', sans-serif", fontSize: "0.9rem", color: "#1e293b",
-                                                }}
-                                            >
-                                                <span style={{
-                                                    flexShrink: 0, width: "1.6rem", height: "1.6rem",
-                                                    borderRadius: "50%", border: selected ? "2px solid #3b82f6" : "2px solid #94a3b8",
-                                                    backgroundColor: selected ? "#3b82f6" : "transparent",
-                                                    color: selected ? "#fff" : "#64748b",
-                                                    display: "flex", alignItems: "center", justifyContent: "center",
-                                                    fontSize: "0.75rem", fontWeight: 700,
-                                                }}>
-                                                    {letter}
-                                                </span>
-                                                <span style={{ paddingTop: "0.1rem" }}>{opt}</span>
-                                            </button>
-                                        );
-                                    })}
-                                </div>
-                            ) : (
-                                // Student Produced Response
-                                <div>
-                                    <p style={{ fontSize: "0.75rem", color: "#94a3b8", marginBottom: "0.5rem" }}>Student-Produced Response — Enter your answer:</p>
-                                    <input
-                                        type="text"
-                                        value={freeText[currentIdx] ?? ""}
-                                        onChange={e => setFreeText(prev => ({ ...prev, [currentIdx]: e.target.value }))}
-                                        placeholder="Type answer here…"
-                                        style={{ padding: "0.6rem 0.875rem", border: "1.5px solid #3b82f6", borderRadius: "8px", fontFamily: "Arial, sans-serif", fontSize: "1rem", color: "#1e293b", outline: "none", width: "200px" }}
-                                    />
-                                </div>
-                            )}
-                        </>
-                    ) : (
-                        <p style={{ color: "#94a3b8", fontStyle: "italic" }}>No questions loaded.</p>
-                    )}
+            {/* 3. THE "PACK" (Bottom Navigation Grid) */}
+            <footer className="h-20 bg-white flex items-center justify-between px-6 shrink-0 shadow-[0_-2px_10px_rgba(0,0,0,0.05)] relative z-20 overflow-hidden">
+                <div className="flex items-center space-x-4 sm:w-1/4">
+                    <span className="font-semibold text-gray-700 hidden sm:inline-block">Dhruv Shah</span>
                 </div>
-            </div>
 
-            {/* ══════════ FOOTER ══════════ */}
-            <footer style={{
-                height: "60px", backgroundColor: "#f1f5f9",
-                borderTop: "1px solid #e2e8f0",
-                display: "flex", alignItems: "center", padding: "0 1.25rem", gap: "1rem",
-                flexShrink: 0, zIndex: 10,
-            }}>
-                {/* Question Grid */}
-                <div style={{ display: "flex", gap: "3px", overflowX: "auto", flex: 1, alignItems: "center" }}>
-                    {questions.map((_, i) => {
-                        const isAnswered = q?.options ? !!answers[i] : !!freeText[i];
-                        const isMarked = marked.has(i);
-                        const isCurrent = i === currentIdx;
+                {/* The Bluebook Square Nav */}
+                <div className="flex space-x-1 overflow-x-auto px-4 w-full sm:w-1/2 justify-center pb-2 pt-2 scrollbar-hide">
+                    {questions.map((q, idx) => {
+                        const isAnswered = q.options ? !!answers[idx] : !!freeText[idx];
+                        const isMarked = marked.has(idx);
                         return (
                             <button
-                                key={i}
-                                onClick={() => setCurrentIdx(i)}
-                                title={`Question ${i + 1}${isMarked ? " (Marked)" : ""}`}
-                                style={{
-                                    width: "26px", height: "26px", flexShrink: 0,
-                                    border: isCurrent ? "2px solid #1d4ed8" : "1.5px solid #cbd5e0",
-                                    borderRadius: "4px",
-                                    backgroundColor: isCurrent ? "#1d4ed8" : isMarked ? "#fef3c7" : isAnswered ? "#dbeafe" : "#fff",
-                                    color: isCurrent ? "#fff" : "#475569",
-                                    fontSize: "0.6rem", fontWeight: 700, cursor: "pointer",
-                                    position: "relative",
-                                }}
+                                key={idx}
+                                onClick={() => setCurrentIndex(idx)}
+                                className={`w-9 h-9 flex items-center justify-center text-sm font-bold border transition-colors shrink-0 relative ${currentIndex === idx
+                                    ? 'bg-blue-600 text-white border-blue-600'
+                                    : isAnswered
+                                        ? 'bg-blue-50 text-blue-900 border-blue-300 hover:bg-blue-100'
+                                        : 'bg-white text-gray-800 border-gray-400 hover:bg-gray-200'
+                                    }`}
                             >
-                                {i + 1}
-                                {isMarked && <span style={{ position: "absolute", top: "-3px", right: "-3px", fontSize: "0.5rem" }}>🚩</span>}
+                                {idx + 1}
+                                {isMarked && (
+                                    <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                                        <span className="absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                                        <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500 border border-white"></span>
+                                    </span>
+                                )}
                             </button>
                         );
                     })}
                 </div>
 
-                {/* Mark for Review */}
-                <button
-                    onClick={() => setMarked(prev => {
-                        const n = new Set(prev);
-                        n.has(currentIdx) ? n.delete(currentIdx) : n.add(currentIdx);
-                        return n;
-                    })}
-                    style={{
-                        display: "flex", alignItems: "center", gap: "0.35rem",
-                        background: "none", border: "1.5px solid #94a3b8", borderRadius: "6px",
-                        padding: "0.35rem 0.75rem", fontSize: "0.75rem", fontWeight: 600, cursor: "pointer",
-                        color: marked.has(currentIdx) ? "#d97706" : "#475569",
-                        borderColor: marked.has(currentIdx) ? "#d97706" : "#94a3b8",
-                        whiteSpace: "nowrap", flexShrink: 0,
-                    }}
-                >
-                    🚩 {marked.has(currentIdx) ? "Marked" : "Mark for Review"}
-                </button>
-
-                {/* Back / Next / Submit */}
-                <div style={{ display: "flex", gap: "0.5rem", flexShrink: 0 }}>
+                <div className="flex space-x-4 sm:w-1/4 justify-end">
                     <button
-                        onClick={() => setCurrentIdx(i => Math.max(0, i - 1))}
-                        disabled={currentIdx === 0}
-                        style={{ padding: "0.4rem 1rem", borderRadius: "6px", border: "1.5px solid #94a3b8", backgroundColor: "#fff", fontSize: "0.82rem", fontWeight: 600, cursor: currentIdx === 0 ? "default" : "pointer", opacity: currentIdx === 0 ? 0.4 : 1, color: "#475569" }}
+                        onClick={() => setCurrentIndex(prev => Math.max(0, prev - 1))}
+                        className="px-6 py-2 border border-blue-600 text-blue-600 font-bold rounded hover:bg-blue-50 disabled:opacity-50 transition-colors hidden sm:inline-block"
+                        disabled={currentIndex === 0}
                     >
-                        ← Back
+                        Back
                     </button>
-                    {isLastQ ? (
+
+                    {currentIndex === questions.length - 1 ? (
                         <button
                             onClick={handleModuleEnd}
-                            style={{ padding: "0.4rem 1.25rem", borderRadius: "6px", border: "none", backgroundColor: "#1d4ed8", color: "#fff", fontSize: "0.82rem", fontWeight: 700, cursor: "pointer" }}
+                            className="px-6 py-2 bg-green-600 text-white font-bold rounded hover:bg-green-700 transition-colors"
                         >
-                            Submit Module ✓
+                            Submit
                         </button>
                     ) : (
                         <button
-                            onClick={() => setCurrentIdx(i => Math.min(questions.length - 1, i + 1))}
-                            style={{ padding: "0.4rem 1rem", borderRadius: "6px", border: "none", backgroundColor: "#1d4ed8", color: "#fff", fontSize: "0.82rem", fontWeight: 600, cursor: "pointer" }}
+                            onClick={() => setCurrentIndex(prev => Math.min(questions.length - 1, prev + 1))}
+                            className="px-6 py-2 bg-blue-600 text-white font-bold rounded hover:bg-blue-700 transition-colors shrink-0"
                         >
-                            Next →
+                            Next
                         </button>
                     )}
                 </div>
             </footer>
 
-            {/* ══════════ DRAGGABLE DESMOS ══════════ */}
+            {/* Desmos Calculator Float */}
             {desmosOpen && isMathStage && (
-                <DesmosCalculator
-                    onClose={() => setDesmosOpen(false)}
-                />
+                <DesmosCalculator onClose={() => setDesmosOpen(false)} />
             )}
         </div>
     );
