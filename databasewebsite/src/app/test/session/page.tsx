@@ -229,22 +229,31 @@ export default function TestSessionPage() {
         
         const weighted = calculateModuleWeightedScore(questions, answers, freeText);
         
+        // Use functional state updates to ensure we have the absolute latest counts
         setModuleCorrectCounts(prev => ({ ...prev, [stage]: correctRaw }));
         setModuleWeightedScores(prev => ({ ...prev, [stage]: weighted }));
 
         if (stage === 1 || stage === 3) {
             setPhase("between");
         } else if (stage === 2) {
-            const isHigher = (moduleCorrectCounts[1] || 0) >= 15.4; 
+            // End of Reading & Writing Section
+            const m1Correct = moduleCorrectCounts[1] || 0;
+            const isHigher = m1Correct >= 15; // 15/22 is ~68%, let's use 15+ as requested 70%-ish threshold
             const scaled = calculateSectionScaledScore(moduleWeightedScores[1] || 0, weighted, isHigher);
             setFinalRWScore(scaled);
             setPhase("between");
-        } else {
-            const isHigher = (moduleCorrectCounts[3] || 0) >= 15.4;
+        } else if (stage === 4) {
+            // End of Math Section
+            const m3Correct = moduleCorrectCounts[3] || 0;
+            const isHigher = m3Correct >= 15;
             const scaled = calculateSectionScaledScore(moduleWeightedScores[3] || 0, weighted, isHigher);
-            const math = scaled;
-            setFinalMathScore(math);
-            setFinalOverallScore(finalRWScore + math);
+            
+            
+            // Calculate and set final scores
+            setFinalMathScore(scaled);
+            setFinalOverallScore(finalRWScore + scaled);
+            
+            // Advance to complete screen
             setPhase("complete");
         }
     };
@@ -252,8 +261,9 @@ export default function TestSessionPage() {
     const handleNextModule = () => {
         const next = (stage + 1) as Stage;
         if (next > 4) { setPhase("complete"); return; }
+        const accuracyPct = Math.round(((moduleCorrectCounts[stage] || 0) / 22) * 100);
         setStage(next);
-        loadStage(next, moduleCorrectCounts[stage]);
+        loadStage(next, accuracyPct);
     };
 
     const q = questions[currentIdx];
@@ -275,11 +285,12 @@ export default function TestSessionPage() {
         <div style={{ height: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", backgroundColor: "#0f172a", color: "#e2e8f0", fontFamily: "'Inter', sans-serif", textAlign: "center", padding: "2rem" }}>
             <p style={{ fontSize: "0.7rem", letterSpacing: "0.15em", textTransform: "uppercase", color: "#64748b", marginBottom: "0.75rem" }}>Section Complete</p>
             <h2 style={{ fontSize: "2rem", fontWeight: 700, marginBottom: "1rem" }}>{cfg.label}</h2>
-            <p style={{ color: "#94a3b8", marginBottom: "0.5rem", fontSize: "0.9rem" }}>Correct Scored Questions: <strong style={{ color: "#e2e8f0" }}>{moduleCorrectCounts[stage] || 0} / 22</strong></p>
+            <p style={{ color: "#94a3b8", marginBottom: "0.5rem", fontSize: "0.9rem" }}>Questions Answered: <strong style={{ color: "#e2e8f0" }}>{Object.keys(answers).length + Object.keys(freeText).length} / 24</strong></p>
             {stage < 4 && <p style={{ color: "#64748b", marginBottom: "2rem", fontSize: "0.85rem" }}>
-                {stage === 1 ? "Next: RW Module 2" : stage === 2 ? "Next: Math Module 1" : "Next: Math Module 2"}
-                {(stage === 1 || stage === 3) && <span style={{ color: (moduleCorrectCounts[stage] || 0) >= 15.4 ? "#4ade80" : "#f87171", marginLeft: "0.5rem" }}>({(moduleCorrectCounts[stage] || 0) >= 15.4 ? "High" : "Low"} Difficulty Routing)</span>}
+                {stage === 1 ? "Module 2 (Reading & Writing)" : stage === 2 ? "Module 1 (Math)" : "Module 2 (Math)"} is coming up.
+                {(stage === 1 || stage === 3) && <span style={{ color: (moduleCorrectCounts[stage] || 0) >= 15 ? "#4ade80" : "#f87171", marginLeft: "0.5rem" }}>({(moduleCorrectCounts[stage] || 0) >= 15 ? "Higher Tier" : "Standard Tier"} enabled)</span>}
             </p>}
+            {stage === 4 && <p style={{ color: "#64748b", marginBottom: "2rem", fontSize: "0.85rem" }}>You have finished the final module. Your scores are being processed.</p>}
             {stage < 4 ? (
                 <button onClick={handleNextModule} style={{ backgroundColor: "#3b82f6", color: "#fff", border: "none", borderRadius: "8px", padding: "0.8rem 2rem", fontSize: "0.95rem", fontWeight: 600, cursor: "pointer" }}>
                     Begin Next Module →
@@ -293,20 +304,25 @@ export default function TestSessionPage() {
     );
 
     // ─── COMPLETE SCREEN ─────────────────────────────────────
-    if (phase === "complete") return (
-        <div style={{ height: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", backgroundColor: "#0f172a", color: "#e2e8f0", fontFamily: "'Inter', sans-serif", textAlign: "center", padding: "2rem" }}>
-            <p style={{ fontSize: "0.7rem", letterSpacing: "0.15em", textTransform: "uppercase", color: "#64748b", marginBottom: "0.75rem" }}>Test Comprehensive Result</p>
-            <h2 style={{ fontSize: "4.5rem", fontWeight: 900, marginBottom: "0.5rem" }}>{finalOverallScore || (finalRWScore + finalMathScore)}</h2>
-            <p style={{ fontSize: "0.9rem", color: "#94a3b8", marginBottom: "2rem" }}>TOTAL PRACTICE SCORE (400–1600)</p>
+    if (phase === "complete") {
+      const totalCorrect = (moduleCorrectCounts[1] || 0) + (moduleCorrectCounts[2] || 0) + (moduleCorrectCounts[3] || 0) + (moduleCorrectCounts[4] || 0);
+      return (
+        <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", backgroundColor: "#0f172a", color: "#e2e8f0", fontFamily: "'Inter', sans-serif", textAlign: "center", padding: "2rem" }}>
+            <p style={{ fontSize: "0.7rem", letterSpacing: "0.15em", textTransform: "uppercase", color: "#64748b", marginBottom: "0.75rem" }}>Practice Performance Dashboard</p>
+            <h2 style={{ fontSize: "6.5rem", fontWeight: 900, marginBottom: "0", lineHeight: 1, letterSpacing: "-0.02em" }}>{finalRWScore + finalMathScore}</h2>
+            <p style={{ fontSize: "0.8rem", color: "#94a3b8", marginBottom: "1rem", textTransform: "uppercase", letterSpacing: "0.1em" }}>Total Scaled Score (400–1600)</p>
+            <p style={{ fontSize: "0.85rem", color: "#64748b", marginBottom: "3rem" }}><strong>{totalCorrect}</strong> out of 88 questions correct (Excl. pretest)</p>
             
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1.5rem", marginBottom: "2.5rem", width: "100%", maxWidth: "480px" }}>
-                <div style={{ padding: "1.25rem", backgroundColor: "#1e293b", borderRadius: "10px", border: "1px solid #334155" }}>
-                    <p style={{ fontSize: "1.5rem", fontWeight: 800, margin: 0 }}>{finalRWScore}</p>
-                    <p style={{ fontSize: "0.65rem", color: "#94a3b8", textTransform: "uppercase" }}>Reading & Writing</p>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2rem", marginBottom: "3rem", width: "100%", maxWidth: "550px" }}>
+                <div style={{ padding: "1.75rem", backgroundColor: "#1e293b", borderRadius: "14px", border: "1px solid #334155", position: "relative", overflow: "hidden" }}>
+                    <div style={{ position: "absolute", top: 0, left: 0, width: "4px", height: "100%", backgroundColor: "#3b82f6" }}></div>
+                    <p style={{ fontSize: "2.25rem", fontWeight: 800, margin: 0 }}>{finalRWScore}</p>
+                    <p style={{ fontSize: "0.7rem", color: "#94a3b8", textTransform: "uppercase", fontWeight: 600 }}>Reading & Writing</p>
                 </div>
-                <div style={{ padding: "1.25rem", backgroundColor: "#1e293b", borderRadius: "10px", border: "1px solid #334155" }}>
-                    <p style={{ fontSize: "1.5rem", fontWeight: 800, margin: 0 }}>{finalMathScore}</p>
-                    <p style={{ fontSize: "0.65rem", color: "#94a3b8", textTransform: "uppercase" }}>Mathematics</p>
+                <div style={{ padding: "1.75rem", backgroundColor: "#1e293b", borderRadius: "14px", border: "1px solid #334155", position: "relative", overflow: "hidden" }}>
+                    <div style={{ position: "absolute", top: 0, left: 0, width: "4px", height: "100%", backgroundColor: "#ef4444" }}></div>
+                    <p style={{ fontSize: "2.25rem", fontWeight: 800, margin: 0 }}>{finalMathScore}</p>
+                    <p style={{ fontSize: "0.7rem", color: "#94a3b8", textTransform: "uppercase", fontWeight: 600 }}>Mathematics</p>
                 </div>
             </div>
 
@@ -322,7 +338,8 @@ export default function TestSessionPage() {
                 Return to Home
             </a>
         </div>
-    );
+      );
+    }
 
     // ─── MAIN TESTING UI ─────────────────────────────────────
     return (

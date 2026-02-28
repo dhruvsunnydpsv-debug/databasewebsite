@@ -47,19 +47,25 @@ export function calculateModuleWeightedScore(questions: any[], answers: Record<n
 
 /**
  * Combines submodule weighted scores and scales to the SAT 200-800 range.
+ * Scores are rounded to the nearest 10 as per traditional SAT standards.
  */
 export function calculateSectionScaledScore(m1Raw: number, m2Raw: number, isHigherPath: boolean): number {
   const totalRaw = m1Raw + m2Raw;
+  let finalScore: number;
   
   if (isHigherPath) {
     // Scaling for Higher Path: 200 to 800
     const maxTotalCombined = MAX_M1_RAW_WEIGHTED + MAX_M2_HIGHER_RAW_WEIGHTED;
     const scaled = 200 + (totalRaw / maxTotalCombined) * 600;
-    return Math.round(Math.min(800, Math.max(200, scaled)));
+    finalScore = scaled;
   } else {
     // Scaling for Lower Path: 200 to 600 (Benchmark goal)
     const maxTotalCombined = MAX_M1_RAW_WEIGHTED + MAX_M2_LOWER_RAW_WEIGHTED;
     const scaled = 200 + (totalRaw / maxTotalCombined) * 400;
-    return Math.round(Math.min(600, Math.max(200, scaled)));
+    finalScore = scaled;
   }
+
+  // Round to nearest 10
+  const rounded = Math.round(finalScore / 10) * 10;
+  return Math.min(800, Math.max(200, rounded));
 }
