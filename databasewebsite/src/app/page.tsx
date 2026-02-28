@@ -1,305 +1,152 @@
 "use client";
 
-import { useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
+import Link from "next/link";
+import { useEffect, useState } from "react";
 
 export default function Home() {
-    const marqueeRef = useRef<HTMLDivElement>(null);
     const [scrolled, setScrolled] = useState(false);
 
     useEffect(() => {
         const handleScroll = () => {
             setScrolled(window.scrollY > 50);
         };
-        window.addEventListener('scroll', handleScroll, { passive: true });
-        return () => window.removeEventListener('scroll', handleScroll);
+        window.addEventListener("scroll", handleScroll, { passive: true });
+        return () => window.removeEventListener("scroll", handleScroll);
     }, []);
 
     return (
-        <div className="min-h-screen flex flex-col w-full relative overflow-x-hidden" style={{ backgroundColor: '#FBFBF2' }}>
-
-            {/* ── Glassmorphic Navigation ────────────────────────── */}
-            <nav style={{
-                position: 'fixed', top: 0, left: 0, right: 0,
-                height: '70px',
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                padding: '0 2.5rem',
-                backgroundColor: scrolled ? 'rgba(251, 251, 242, 0.85)' : 'transparent',
-                backdropFilter: scrolled ? 'blur(12px)' : 'none',
-                borderBottom: scrolled ? '1px solid rgba(13, 13, 13, 0.08)' : '1px solid transparent',
-                zIndex: 100,
-                transition: 'all 0.3s ease',
-            }}>
-                <div style={{
-                    fontFamily: "'Playfair Display', serif", fontSize: '1.4rem', fontWeight: 900,
-                    letterSpacing: '-0.02em', color: '#0D0D0D'
-                }}>
-                    Verix
+        <div className="min-h-screen bg-[#FBFBF2] text-[#0D0D0D] font-sans flex flex-col items-center justify-start w-full overflow-x-hidden">
+            {/* ── Navigation ── */}
+            <nav
+                className={`w-full h-[70px] flex items-center justify-between px-6 sm:px-10 sticky top-0 z-50 transition-all duration-300 ${scrolled
+                        ? "bg-[#FBFBF2]/90 backdrop-blur-md border-b border-black/10 shadow-sm"
+                        : "bg-transparent border-b border-transparent"
+                    }`}
+            >
+                <div className="font-serif text-2xl font-black tracking-tighter text-[#0D0D0D]">
+                    SAT Engine
                 </div>
-                <div style={{ display: 'flex', gap: '2rem', alignItems: 'center' }}>
-                    <a href="#domains" style={{ fontFamily: "'Inter', sans-serif", fontSize: '0.85rem', fontWeight: 500, color: '#555A', textDecoration: 'none', transition: 'color 0.2s' }} onMouseEnter={e => e.currentTarget.style.color = '#0D0D0D'} onMouseLeave={e => e.currentTarget.style.color = '#555A'}>Curriculum</a>
-                    <a href="#architecture" style={{ fontFamily: "'Inter', sans-serif", fontSize: '0.85rem', fontWeight: 500, color: '#555A', textDecoration: 'none', transition: 'color 0.2s' }} onMouseEnter={e => e.currentTarget.style.color = '#0D0D0D'} onMouseLeave={e => e.currentTarget.style.color = '#555A'}>Methodology</a>
-                    <Link href="/test/session" style={{
-                        padding: '0.55rem 1.4rem',
-                        backgroundColor: '#1A1A1A', color: '#FBFBF2',
-                        borderRadius: '9999px',
-                        fontFamily: "'Inter', sans-serif", fontSize: '0.85rem', fontWeight: 600,
-                        textDecoration: 'none', transition: 'transform 0.15s, background-color 0.15s'
-                    }}
-                        onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.backgroundColor = '#000'; }}
-                        onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.backgroundColor = '#1A1A1A'; }}
+                <div className="flex items-center gap-6">
+                    <a
+                        href="#domains"
+                        className="hidden sm:block text-sm font-medium text-gray-500 hover:text-black transition-colors"
+                    >
+                        Curriculum
+                    </a>
+                    <Link
+                        href="/test/session"
+                        className="px-6 py-2 bg-[#1A1A1A] text-[#FBFBF2] rounded-full text-sm font-bold hover:bg-black hover:-translate-y-0.5 transition-all shadow-md"
                     >
                         Sign In →
                     </Link>
                 </div>
             </nav>
 
-            {/* ── Rotating Circle Badge (Top Left) ─────────────── */}
-            <div className="absolute top-24 left-10 z-[5] opacity-80 pointer-events-none hidden md:block">
-                <svg viewBox="0 0 130 130" width="130" height="130">
-                    <defs>
-                        <path id="circle-path" d="M 65,65 m -50,0 a 50,50 0 1,1 100,0 a 50,50 0 1,1 -100,0" />
-                    </defs>
-                    <g style={{ animation: 'spin 22s linear infinite', transformOrigin: '65px 65px' }}>
-                        <text style={{ fontSize: '10.5px', fontFamily: "'Inter', sans-serif", fontWeight: 600, letterSpacing: '0.22em', fill: '#0D0D0D', textTransform: 'uppercase' }}>
-                            <textPath href="#circle-path">
-                                ELITE DIGITAL SAT PREP • FULL FORMAT TESTS •{' '}
-                            </textPath>
-                        </text>
-                        {/* Center dot */}
-                        <circle cx="65" cy="65" r="5" fill="#0D0D0D" />
-                    </g>
-                </svg>
-            </div>
-
-            {/* ── Background Soft Glows ────────────────────────── */}
-            <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[80vw] h-[60vh] pointer-events-none z-0" style={{
-                background: 'radial-gradient(ellipse at top, rgba(230,213,248,0.4) 0%, rgba(251,251,242,0) 70%)',
-            }} />
-
-            {/* ── Hero Section ──────────────────────────────────── */}
-            <section className="flex flex-col items-center justify-center text-center relative z-10 w-full mx-auto pb-24 pt-48 px-6 gap-8" style={{ maxWidth: '1000px' }}>
-
-                {/* Kicker */}
-                <div className="inline-block px-4 py-1.5 border border-black/10 rounded-full bg-white/50 backdrop-blur-sm" style={{
-                    fontFamily: "'Inter', sans-serif", fontSize: '0.7rem', fontWeight: 600, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#555',
-                }}>
+            {/* ── Hero Section ── */}
+            <main className="w-full max-w-5xl flex flex-col items-center justify-center text-center px-6 pt-32 pb-24 gap-8 z-10">
+                <div className="px-5 py-2 border border-black/10 rounded-full bg-white/60 backdrop-blur-sm text-xs font-bold tracking-widest uppercase text-gray-500 shadow-sm">
                     The Gold Standard in Digital SAT Preparation
                 </div>
 
-                {/* Main Headline */}
-                <h1 className="w-full" style={{
-                    fontFamily: "'Playfair Display', serif",
-                    fontSize: 'clamp(3.5rem, 8vw, 7rem)',
-                    fontWeight: 900,
-                    lineHeight: 1.05,
-                    letterSpacing: '-0.03em',
-                    color: '#0D0D0D',
-                }}>
+                <h1 className="font-serif text-5xl sm:text-6xl md:text-7xl font-black leading-[1.05] tracking-tight text-[#0D0D0D] w-full">
                     Stop guessing.<br />
-                    <span style={{ fontStyle: 'italic', color: '#3A3A35' }}>Just practice.</span>
+                    <span className="italic text-[#3A3A35] font-light">Just practice.</span>
                 </h1>
 
-                {/* Sub-headline */}
-                <p className="max-w-2xl px-4" style={{
-                    fontFamily: "'Inter', sans-serif",
-                    fontSize: '1.25rem',
-                    lineHeight: 1.6,
-                    color: '#555550',
-                    fontWeight: 400
-                }}>
+                <p className="max-w-2xl text-lg sm:text-xl text-gray-600 leading-relaxed font-medium px-4">
                     Access a proprietary database of 10,000+ hand-crafted Digital SAT questions. Expertly curated and perfectly calibrated to official College Board difficulty.
                 </p>
 
-                {/* CTAs */}
-                <div className="flex gap-4 justify-center flex-wrap mt-4">
+                <div className="flex flex-wrap gap-4 justify-center mt-6">
                     <Link
                         href="/test/session"
-                        className="inline-flex items-center px-10 py-4 rounded-full border border-black cursor-pointer text-black"
-                        style={{
-                            backgroundColor: '#E6D5F8',
-                            fontFamily: "'Inter', sans-serif", fontSize: '1rem', fontWeight: 600,
-                            textDecoration: 'none',
-                            boxShadow: '0 4px 14px rgba(230,213,248,0.4), inset 0 -2px 0 rgba(0,0,0,0.1)',
-                            transition: 'all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
-                        }}
-                        onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-4px)'; e.currentTarget.style.boxShadow = '0 8px 24px rgba(230,213,248,0.6), inset 0 -2px 0 rgba(0,0,0,0.1)'; }}
-                        onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 4px 14px rgba(230,213,248,0.4), inset 0 -2px 0 rgba(0,0,0,0.1)'; }}
+                        className="px-10 py-4 bg-[#E6D5F8] text-black font-bold text-lg rounded-full border border-black shadow-[0_4px_14px_rgba(230,213,248,0.4),inset_0_-2px_0_rgba(0,0,0,0.1)] hover:shadow-[0_8px_24px_rgba(230,213,248,0.6),inset_0_-2px_0_rgba(0,0,0,0.1)] hover:-translate-y-1 transition-all active:translate-y-0"
                     >
                         View Question Bank →
                     </Link>
                 </div>
-            </section>
+            </main>
 
-            {/* ── Elite Stats Strip ──────────────────────────────────── */}
-            <section style={{
-                borderTop: '1px solid rgba(13,13,13,0.1)',
-                borderBottom: '1px solid rgba(13,13,13,0.1)',
-                backgroundColor: '#ffffff',
-                padding: '3rem 1.5rem',
-                position: 'relative', zIndex: 10
-            }}>
-                <div style={{ maxWidth: '1000px', margin: '0 auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '2rem', textAlign: 'center' }}>
+            {/* ── Elite Stats Grid ── */}
+            <section className="w-full border-y border-black/10 bg-white py-12 px-6 shadow-sm z-10 relative">
+                <div className="max-w-5xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-8 text-center divide-x-0 md:divide-x divide-black/10">
                     {[
-                        { num: '10,000+', label: 'Curated Questions' },
-                        { num: '4', label: 'Official Domains' },
-                        { num: 'MST', label: 'Adaptive Algorithm' },
-                        { num: '1:1', label: 'Bluebook Interface' },
-                    ].map((s, i) => (
-                        <div key={s.label} style={{
-                            padding: '1rem',
-                            position: 'relative'
-                        }}>
-                            {i !== 0 && <div style={{ position: 'absolute', left: '-1rem', top: '20%', bottom: '20%', width: '1px', backgroundColor: 'rgba(13,13,13,0.1)' }} className="hidden sm:block" />}
-                            <p style={{ fontFamily: "'Playfair Display', serif", fontSize: '2.5rem', fontWeight: 900, color: '#0D0D0D', marginBottom: '0.4rem', letterSpacing: '-0.02em' }}>{s.num}</p>
-                            <p style={{ fontFamily: "'Inter', sans-serif", fontSize: '0.75rem', color: '#666', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 600 }}>{s.label}</p>
+                        { num: "10k+", label: "Curated Questions" },
+                        { num: "4", label: "Official Domains" },
+                        { num: "MST", label: "Adaptive Engine" },
+                        { num: "1:1", label: "Bluebook Interface" },
+                    ].map((stat, i) => (
+                        <div key={i} className="flex flex-col items-center justify-center p-4">
+                            <p className="font-serif text-4xl sm:text-5xl font-black text-[#0D0D0D] tracking-tight mb-2">
+                                {stat.num}
+                            </p>
+                            <p className="text-xs font-bold uppercase tracking-widest text-gray-500">
+                                {stat.label}
+                            </p>
                         </div>
                     ))}
                 </div>
             </section>
 
-            {/* ── Interactive Bento Domains ──────────────────────────────── */}
-            <section id="domains" style={{ padding: '8rem 1.5rem', backgroundColor: '#FBFBF2' }}>
-                <div style={{ maxWidth: '1100px', margin: '0 auto' }}>
-
-                    <div style={{ textAlign: 'center', marginBottom: '4rem' }}>
-                        <p style={{ fontFamily: "'Inter', sans-serif", fontSize: '0.75rem', fontWeight: 700, letterSpacing: '0.15em', textTransform: 'uppercase', color: '#A0A096', marginBottom: '1.5rem' }}>
+            {/* ── Domains Section ── */}
+            <section id="domains" className="w-full bg-[#FBFBF2] py-32 px-6 flex flex-col items-center z-10 relative">
+                <div className="max-w-6xl w-full flex flex-col items-center">
+                    <div className="text-center mb-16">
+                        <p className="text-xs font-bold uppercase tracking-[0.15em] text-gray-400 mb-4">
                             The Curriculum
                         </p>
-                        <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: 'clamp(2.5rem, 5vw, 4rem)', fontWeight: 800, letterSpacing: '-0.02em', color: '#0D0D0D' }}>
+                        <h2 className="font-serif text-4xl sm:text-5xl lg:text-6xl font-black text-[#0D0D0D] tracking-tight">
                             Every domain. Every difficulty.
                         </h2>
                     </div>
 
-                    <div style={{
-                        display: 'grid',
-                        gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
-                        gap: '1.5rem'
-                    }}>
+                    <div className="w-full grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                         {[
-                            { domain: 'Heart of Algebra', module: 'Math', count: '2,500', icon: '∑', desc: 'Linear equations, inequalities, and graphing deeply analyzed.', color: '#D4EFD4' },
-                            { domain: 'Advanced Math', module: 'Math', count: '2,200', icon: 'ƒ', desc: 'Quadratics, polynomials, and complex non-linear functions.', color: '#D4EFD4' },
-                            { domain: 'Craft & Structure', module: 'Reading & Writing', count: '1,800', icon: '¶', desc: 'Words in context, text purpose, and dual-passage synthesis.', color: '#E6D5F8' },
-                            { domain: 'Expression of Ideas', module: 'Reading & Writing', count: '1,900', icon: '✎', desc: 'Rhetorical synthesis and transition mechanics.', color: '#E6D5F8' },
-                            { domain: 'Geometry & Trig', module: 'Math', count: '1,600', icon: '△', desc: 'Area, volume, trigonometry, and circle theorems.', color: '#D4EFD4' },
-                            { domain: 'Information & Ideas', module: 'Reading & Writing', count: '2,100', icon: '◉', desc: 'Central ideas, inferences, and quantitative command of evidence.', color: '#E6D5F8' },
-                        ].map(d => (
+                            { domain: "Heart of Algebra", module: "Math", icon: "∑", desc: "Linear equations, inequalities, and graphing deeply analyzed.", color: "bg-[#D4EFD4]" },
+                            { domain: "Advanced Math", module: "Math", icon: "ƒ", desc: "Quadratics, polynomials, and complex non-linear functions.", color: "bg-[#D4EFD4]" },
+                            { domain: "Geometry & Trig", module: "Math", icon: "△", desc: "Area, volume, trigonometry, and circle theorems.", color: "bg-[#D4EFD4]" },
+                            { domain: "Craft & Structure", module: "Reading & Writing", icon: "¶", desc: "Words in context, text purpose, and dual-passage synthesis.", color: "bg-[#E6D5F8]" },
+                            { domain: "Expression of Ideas", module: "Reading & Writing", icon: "✎", desc: "Rhetorical synthesis and transition mechanics.", color: "bg-[#E6D5F8]" },
+                            { domain: "Information & Ideas", module: "Reading & Writing", icon: "◉", desc: "Central ideas, inferences, and quantitative command of evidence.", color: "bg-[#E6D5F8]" },
+                        ].map((d, i) => (
                             <div
-                                key={d.domain}
-                                style={{
-                                    padding: '2.5rem 2rem',
-                                    border: '1px solid rgba(13,13,13,0.1)',
-                                    borderRadius: '16px',
-                                    backgroundColor: '#FFFFFF',
-                                    transition: 'all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1)',
-                                    cursor: 'pointer',
-                                    position: 'relative',
-                                    overflow: 'hidden',
-                                    boxShadow: '0 4px 24px rgba(0,0,0,0.02)'
-                                }}
-                                onMouseEnter={e => {
-                                    e.currentTarget.style.transform = 'translateY(-8px)';
-                                    e.currentTarget.style.boxShadow = '0 20px 40px rgba(0,0,0,0.08)';
-                                    e.currentTarget.style.borderColor = 'rgba(13,13,13,0.3)';
-                                }}
-                                onMouseLeave={e => {
-                                    e.currentTarget.style.transform = 'translateY(0)';
-                                    e.currentTarget.style.boxShadow = '0 4px 24px rgba(0,0,0,0.02)';
-                                    e.currentTarget.style.borderColor = 'rgba(13,13,13,0.1)';
-                                }}
+                                key={i}
+                                className="group flex flex-col p-8 bg-white border border-black/10 rounded-2xl cursor-pointer hover:-translate-y-2 hover:shadow-2xl hover:border-black/30 transition-all duration-300 ease-out relative overflow-hidden"
                             >
-                                {/* Decorative Hover Gradient */}
-                                <div style={{
-                                    position: 'absolute', top: 0, right: 0, width: '150px', height: '150px',
-                                    background: `radial-gradient(circle at top right, ${d.color}, transparent)`,
-                                    opacity: 0.3, borderRadius: '50%', transform: 'translate(40%, -40%)',
-                                    pointerEvents: 'none'
-                                }} />
+                                {/* Decorative Gradient */}
+                                <div className={`absolute -top-10 -right-10 w-40 h-40 rounded-full opacity-0 group-hover:opacity-40 blur-3xl transition-opacity duration-300 ${d.color}`} />
 
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '2rem' }}>
-                                    <div style={{ fontSize: '2rem', color: '#0D0D0D' }}>{d.icon}</div>
-                                    <span style={{
-                                        backgroundColor: d.color,
-                                        border: '1px solid rgba(13,13,13,0.1)',
-                                        borderRadius: '9999px',
-                                        padding: '0.3rem 0.8rem',
-                                        fontSize: '0.65rem',
-                                        fontWeight: 700,
-                                        letterSpacing: '0.05em',
-                                        textTransform: 'uppercase',
-                                        fontFamily: "'Inter', sans-serif",
-                                    }}>
+                                <div className="flex justify-between items-start mb-8 z-10">
+                                    <div className="text-4xl text-[#0D0D0D] font-light">{d.icon}</div>
+                                    <span className={`px-3 py-1 text-[10px] font-bold uppercase tracking-wider rounded-full border border-black/10 ${d.color} shadow-sm`}>
                                         {d.module}
                                     </span>
                                 </div>
-                                <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: '1.4rem', fontWeight: 800, marginBottom: '0.75rem', color: '#0D0D0D' }}>{d.domain}</h3>
-                                <p style={{ fontFamily: "'Inter', sans-serif", fontSize: '0.9rem', color: '#666', lineHeight: 1.5, marginBottom: '1.5rem' }}>{d.desc}</p>
 
-                                <div style={{
-                                    display: 'flex', alignItems: 'center', gap: '0.5rem',
-                                    borderTop: '1px solid rgba(13,13,13,0.08)', paddingTop: '1.25rem'
-                                }}>
-                                    <span style={{ fontFamily: "'Inter', sans-serif", fontSize: '0.8rem', fontWeight: 600, color: '#0D0D0D' }}>{d.count}+</span>
-                                    <span style={{ fontFamily: "'Inter', sans-serif", fontSize: '0.8rem', color: '#888' }}>curated variants</span>
-                                </div>
+                                <h3 className="font-serif text-2xl font-bold text-[#0D0D0D] mb-3 z-10">
+                                    {d.domain}
+                                </h3>
+                                <p className="text-gray-600 leading-relaxed font-medium z-10 text-sm">
+                                    {d.desc}
+                                </p>
                             </div>
                         ))}
                     </div>
                 </div>
             </section>
 
-            {/* ── Angled Bottom-Right Marquee ───────────────────── */}
-            <div style={{
-                position: 'fixed',
-                bottom: '4rem',
-                right: '-40px',
-                width: '550px',
-                backgroundColor: '#0D0D0D',
-                color: '#FBFBF2',
-                padding: '0.8rem 0',
-                transform: 'rotate(-6deg)',
-                transformOrigin: 'bottom right',
-                overflow: 'hidden',
-                zIndex: 50,
-                pointerEvents: 'none',
-                boxShadow: '0 10px 30px rgba(0,0,0,0.3)',
-                borderTop: '1px solid rgba(255,255,255,0.2)',
-                borderBottom: '1px solid rgba(255,255,255,0.2)'
-            }}>
-                <div style={{
-                    display: 'flex',
-                    whiteSpace: 'nowrap',
-                    animation: 'marquee 25s linear infinite',
-                    fontFamily: "'Inter', sans-serif",
-                    fontSize: '0.8rem',
-                    fontWeight: 600,
-                    letterSpacing: '0.12em',
-                    textTransform: 'uppercase',
-                    gap: '2.5rem',
-                }}>
-                    {Array(5).fill('Heart of Algebra • Craft & Structure • Advanced Math • Expression of Ideas • ').join('')}
+            {/* ── Footer ── */}
+            <footer className="w-full py-16 px-6 bg-white border-t border-black/10 flex flex-col items-center justify-center text-center z-10 relative">
+                <div className="font-serif text-2xl font-black tracking-tighter text-[#0D0D0D] mb-4">
+                    SAT Engine
                 </div>
-            </div>
-
-            {/* ── Footer ──────────────────────────────────── */}
-            <footer style={{ padding: '4rem 2.5rem', borderTop: '1px solid rgba(13,13,13,0.1)', backgroundColor: '#FFFFFF', textAlign: 'center' }}>
-                <p style={{ fontFamily: "'Inter', sans-serif", fontSize: '0.85rem', color: '#888' }}>
-                    © {new Date().getFullYear()} Verix. Engineered by Dhruv Shah. Not affiliated with the College Board.
+                <p className="text-sm font-medium text-gray-500">
+                    © {new Date().getFullYear()} SAT Prep Engine. Engineered for excellence.
+                </p>
+                <p className="text-xs text-gray-400 mt-2 italic">
+                    Not affiliated with or endorsed by the College Board.
                 </p>
             </footer>
-
-            {/* ── CSS Keyframes ─────────────────────────────────── */}
-            <style>{`
-                @keyframes spin {
-                    from { transform: rotate(0deg); }
-                    to   { transform: rotate(360deg); }
-                }
-                @keyframes marquee {
-                    from { transform: translateX(0); }
-                    to   { transform: translateX(-50%); }
-                }
-                html { scroll-behavior: smooth; }
-            `}</style>
         </div>
     );
 }

@@ -61,14 +61,27 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 async function fetchQuestions(stage: Stage, module1Score?: number, seenIds?: Set<string>): Promise<Question[]> {
     const cfg = STAGE_CONFIG[stage];
     const isMath = cfg.subject === "math";
-    const sectionString = isMath ? "Math" : "Reading_Writing";
     const total = cfg.count;
 
-    // DIRECT SIMPLE QUERY - NO ORDER(), NO LIMIT()
-    const { data, error } = await supabase
-        .from('sat_question_bank')
-        .select('*')
-        .eq('section', sectionString);
+    let data, error;
+
+    if (isMath) {
+        const res = await supabase
+            .from('sat_question_bank')
+            .select('*')
+            .in('domain', ['Heart_of_Algebra', 'Advanced_Math', 'Problem_Solving_Data', 'Geometry_Trigonometry'])
+            .limit(total * 4); // fetch extra to shuffle
+        data = res.data;
+        error = res.error;
+    } else {
+        const res = await supabase
+            .from('sat_question_bank')
+            .select('*')
+            .in('domain', ['Information_Ideas', 'Craft_Structure', 'Expression_Ideas', 'Standard_English'])
+            .limit(total * 4); // fetch extra to shuffle
+        data = res.data;
+        error = res.error;
+    }
 
     if (error || !data) {
         console.error("Supabase Error:", error);
@@ -82,7 +95,7 @@ async function fetchQuestions(stage: Stage, module1Score?: number, seenIds?: Set
 
     let placeholderIdx = 0;
     while (results.length < total) {
-        results.push(makePlaceholder(sectionString, "Medium", "General", placeholderIdx++));
+        results.push(makePlaceholder(isMath ? "Math" : "Reading_Writing", "Medium", "General", placeholderIdx++));
     }
 
     return results;
