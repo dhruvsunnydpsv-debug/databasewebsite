@@ -55,7 +55,7 @@ async function fetchQuestions(stage: Stage, module1Score?: number): Promise<Ques
 
     // Domain distribution for this module
     const mathDomains = ["Heart_of_Algebra", "Advanced_Math", "Problem_Solving_Data", "Geometry_Trigonometry"];
-    const rwDomains = ["Information_and_Ideas", "Craft_and_Structure", "Expression_of_Ideas", "Standard_English_Conventions"];
+    const rwDomains = ["Information_Ideas", "Craft_Structure", "Expression_Ideas", "Standard_English"];
     const domains = isMath ? mathDomains : rwDomains;
 
     // Difficulty distribution

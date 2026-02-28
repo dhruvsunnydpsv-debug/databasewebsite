@@ -25,7 +25,7 @@ export default function Home() {
                     <g style={{ animation: 'spin 22s linear infinite', transformOrigin: '65px 65px' }}>
                         <text style={{ fontSize: '10.5px', fontFamily: "'Inter', sans-serif", fontWeight: 600, letterSpacing: '0.22em', fill: '#0D0D0D', textTransform: 'uppercase' }}>
                             <textPath href="#circle-path">
-                                ELITE DIGITAL SAT PREP • FULL FORMAT TESTS •{' '}
+                                DIGITAL SAT PREP • FULL FORMAT TESTS •{' '}
                             </textPath>
                         </text>
                         {/* Center dot */}
@@ -60,8 +60,8 @@ export default function Home() {
                     color: '#0D0D0D',
                     marginBottom: '2rem',
                 }}>
-                    Stop guessing.<br />
-                    <span style={{ fontStyle: 'italic' }}>Just practice.</span>
+                    Don't run out of practice.<br />
+                    <span style={{ fontStyle: 'italic' }}>Just generate.</span>
                 </h1>
 
                 {/* Sub-headline */}
@@ -73,7 +73,7 @@ export default function Home() {
                     maxWidth: '580px',
                     margin: '0 auto 2.5rem',
                 }}>
-                    Access a proprietary database of <strong style={{ color: '#0D0D0D' }}>10,000+</strong> hand-crafted Digital SAT questions. Perfectly calibrated to official College Board difficulty and format.
+                    The AI-powered engine that synthesizes infinite, perfectly calibrated Digital SAT questions. Never take the same test twice.
                 </p>
 
                 {/* CTAs */}
@@ -92,7 +92,7 @@ export default function Home() {
                         onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#D4BFEF'; e.currentTarget.style.transform = 'translateY(-2px)'; }}
                         onMouseLeave={e => { e.currentTarget.style.backgroundColor = '#E6D5F8'; e.currentTarget.style.transform = 'translateY(0)'; }}
                     >
-                        View Question Bank →
+                        Start Practicing →
                     </a>
                     <a
                         href="#domains"
