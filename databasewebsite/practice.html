@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SAT Practice Session — Digital Engine</title>
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Inter:wght@300;400;500;600;700;800&family=Roboto+Mono&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Supabase CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['Roboto Mono', 'monospace'],
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <style>
+        :root {
+            --bluebook-blue: #003087;
+            --bluebook-dark: #1E2532;
+        }
+        body {
+            background-color: #f8fafc;
+            color: #0f172a;
+            user-select: none;
+            overflow: hidden;
+        }
+        .bluebook-card {
+            background: white;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .option-btn {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            padding: 12px 16px;
+            border: 1.5px solid #e2e8f0;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.1s ease;
+            text-align: left;
+        }
+        .option-btn.selected {
+            border-color: #3b82f6;
+            background-color: #eff6ff;
+        }
+        .option-letter {
+            flex-shrink: 0;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            border: 2px solid #94a3b8;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 700;
+            color: #64748b;
+        }
+        .option-btn.selected .option-letter {
+            border-color: #3b82f6;
+            background-color: #3b82f6;
+            color: white;
+        }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+        /* Desmos Styles */
+        #desmos-container {
+            position: absolute;
+            z-index: 1000;
+            box-shadow: 0 12px 48px rgba(0,0,0,0.3);
+            border: 1px solid #2d3748;
+            border-radius: 8px;
+            overflow: hidden;
+            width: 600px;
+            background: white;
+            display: none;
+        }
+        .desmos-handle {
+            background: #1a1a2e;
+            color: #e2e8f0;
+            padding: 8px 14px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: grab;
+        }
+    </style>
+</head>
+<body class="font-sans h-screen flex flex-col">
+
+    <!-- ── LOADING OVERLAY ── -->
+    <div id="loading-overlay" class="fixed inset-0 z-[9999] bg-white flex flex-col items-center justify-center">
+        <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mb-4"></div>
+        <p class="text-sm font-medium text-gray-500 uppercase tracking-widest">Digital SAT Secure Environment</p>
+    </div>
+
+    <!-- ── HEADER ── -->
+    <header class="h-[52px] bg-[#1E2532] flex items-center justify-between px-6 text-white shrink-0 z-10">
+        <div class="flex items-center gap-4">
+            <span class="text-xs font-semibold px-2 py-1 hover:bg-white/10 rounded cursor-pointer">Directions ▼</span>
+            <span id="stage-label" class="text-sm border-l border-white/20 pl-4 py-1 text-gray-300 font-medium">Reading & Writing</span>
+        </div>
+        
+        <div class="absolute left-1/2 -translate-x-1/2 flex flex-col items-center">
+            <button id="toggle-timer" class="flex flex-col items-center px-4 py-1 hover:bg-white/10 rounded transition-colors">
+                <span id="timer-display" class="text-lg font-mono font-bold tracking-wider">32:00</span>
+                <span id="timer-hide-text" class="text-[10px] uppercase tracking-tighter text-gray-400">Hide</span>
+            </button>
+        </div>
+
+        <div class="flex items-center gap-4">
+            <button id="desmos-toggle" class="bg-white/10 hover:bg-white/20 p-2 rounded-md transition-all">
+                <i data-lucide="calculator" class="w-5 h-5"></i>
+            </button>
+            <button id="finish-test" class="bg-white text-black px-4 py-1 rounded-md text-sm font-bold hover:bg-gray-200">
+                Finish Test
+            </button>
+        </div>
+    </header>
+
+    <!-- ── MAIN CONTENT ── -->
+    <main class="flex-grow flex flex-col bg-[#F1F5F9] overflow-hidden p-6 gap-6">
+        
+        <!-- Question Area -->
+        <div class="flex-grow flex gap-6 max-w-[1400px] mx-auto w-full overflow-hidden">
+            
+            <!-- Left Side: Prompt (For RW) -->
+            <div id="prompt-panel" class="w-1/2 bluebook-card p-8 overflow-y-auto no-scrollbar hidden">
+                <div id="prompt-text" class="text-[17px] leading-[1.65] text-[#1e293b] font-medium serif-text"></div>
+            </div>
+
+            <!-- Right Side: Question & Options -->
+            <div id="question-panel" class="flex-grow bluebook-card flex flex-col overflow-hidden">
+                <div class="flex items-center justify-between p-4 border-b">
+                    <div class="flex items-center gap-3">
+                        <span id="q-number" class="bg-[#1E2532] text-white w-8 h-8 flex items-center justify-center rounded font-bold">1</span>
+                        <button id="mark-btn" class="flex items-center gap-2 text-sm font-medium text-gray-500 hover:text-black">
+                            <i data-lucide="bookmark" class="w-4 h-4"></i> Mark for Review
+                        </button>
+                    </div>
+                    <div class="flex gap-2">
+                        <button id="strike-toggle" class="p-2 border rounded hover:bg-gray-50"><i data-lucide="strikethrough" class="w-4 h-4"></i></button>
+                    </div>
+                </div>
+
+                <div class="flex-grow overflow-y-auto p-8">
+                    <div id="question-text" class="text-lg font-bold text-[#1e293b] mb-8 leading-relaxed"></div>
+                    
+                    <!-- Multiple Choice Container -->
+                    <div id="options-container" class="flex flex-col gap-3"></div>
+
+                    <!-- Student Produced Response (Math) -->
+                    <div id="spr-container" class="hidden">
+                        <p class="text-sm font-bold text-gray-500 mb-2">Student Produced Response</p>
+                        <input type="text" id="spr-input" placeholder="Enter your answer" class="w-full max-w-xs p-3 border-2 border-slate-300 rounded-lg text-lg font-mono focus:border-blue-600 outline-none">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- BOTTOM NAV -->
+        <footer class="h-[64px] bg-white border-t flex items-center justify-between px-8 shrink-0">
+            <div class="flex items-center gap-4">
+                <span id="user-initials" class="w-10 h-10 bg-blue-100 text-blue-800 flex items-center justify-center rounded-md font-bold text-sm">DS</span>
+                <div class="text-xs">
+                    <p class="font-bold text-gray-900">Dhruv Shah</p>
+                    <button class="text-blue-600 hover:underline">Question Navigator ▲</button>
+                </div>
+            </div>
+
+            <div class="flex gap-4">
+                <button id="prev-btn" class="px-6 py-2 border-2 border-black/5 rounded-md font-bold hover:bg-gray-50 flex items-center gap-2">Back</button>
+                <button id="next-btn" class="px-8 py-2 bg-[#003087] text-white rounded-md font-bold hover:bg-blue-800 flex items-center gap-2">Next</button>
+            </div>
+        </footer>
+    </main>
+
+    <!-- ── BETWEEN MODULES ── -->
+    <div id="between-screen" class="fixed inset-0 z-[5000] bg-slate-900 text-white flex flex-col items-center justify-center hidden">
+        <p class="text-xs tracking-widest uppercase text-gray-500 mb-2">Section Complete</p>
+        <h2 id="between-title" class="text-3xl font-bold mb-4">Reading & Writing</h2>
+        <p class="text-gray-400 mb-8 max-w-md text-center">Take a moment to breathe. The next module will adjust difficulty based on your performance.</p>
+        <button id="resume-btn" class="bg-blue-600 text-white px-10 py-3 rounded-md font-bold text-lg hover:bg-blue-700">Begin Next Module →</button>
+    </div>
+
+    <!-- ── RESULTS SCREEN ── -->
+    <div id="results-screen" class="fixed inset-0 z-[6000] bg-slate-900 text-white overflow-y-auto hidden">
+        <div class="min-h-screen flex flex-col items-center justify-center p-8">
+            <p class="text-xs tracking-widest uppercase text-gray-400 mb-2">Practice Performance Dashboard</p>
+            <h2 id="total-score" class="text-8xl sm:text-[10rem] font-black leading-none tracking-tighter mb-4">1600</h2>
+            <p class="text-lg text-gray-400 uppercase tracking-[0.2em] mb-12">Total Scaled Score</p>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 w-full max-w-2xl mb-12">
+                <div class="p-8 bg-slate-800 rounded-2xl border border-slate-700 border-l-[6px] border-l-blue-500">
+                    <p id="rw-score" class="text-5xl font-black mb-1">800</p>
+                    <p class="text-xs font-bold text-gray-400 uppercase">Reading & Writing</p>
+                </div>
+                <div class="p-8 bg-slate-800 rounded-2xl border border-slate-700 border-l-[6px] border-l-red-500">
+                    <p id="math-score" class="text-5xl font-black mb-1">800</p>
+                    <p class="text-xs font-bold text-gray-400 uppercase">Mathematics</p>
+                </div>
+            </div>
+
+            <div class="w-full max-w-2xl bg-white/5 border border-dashed border-slate-700 p-4 rounded-lg mb-8 text-xs text-gray-500 leading-relaxed">
+                <strong>Disclaimer:</strong> This adaptive scoring model uses a proprietary research-based algorithm including weighted question values and scaled path adjustments. It does not claim to match official College Board results.
+            </div>
+
+            <a href="index.html" class="bg-[#E6D5F8] text-black px-12 py-4 rounded-full font-bold text-lg hover:bg-[#D4BFEF] transition-all">Return to Home</a>
+        </div>
+    </div>
+
+    <!-- ── DESMOS DRAGGABLE ── -->
+    <div id="desmos-container">
+        <div class="desmos-handle">
+            <span class="text-sm font-bold flex items-center gap-2"><i data-lucide="activity" class="w-4 h-4"></i> Graphing Calculator</span>
+            <button id="desmos-close" class="hover:text-white/50">✕</button>
+        </div>
+        <div id="desmos-mount" style="height: 400px;"></div>
+    </div>
+
+    <script id="desmos-script" src="https://www.desmos.com/api/v1.9/calculator.js?apiKey=8070e617ff6145e8ab4d323341f3d29d" async></script>
+
+    <script>
+        // --- CONSTANTS & CONFIG ---
+        const SUPABASE_URL = ""; // SET YOUR URL
+        const SUPABASE_KEY = ""; // SET YOUR ANON KEY
+        
+        const STAGE_CONFIG = {
+            1: { label: "Reading & Writing — Module 1", count: 24, seconds: 32 * 60, subject: "rw" },
+            2: { label: "Reading & Writing — Module 2", count: 24, seconds: 32 * 60, subject: "rw" },
+            3: { label: "Math — Module 1", count: 24, seconds: 35 * 60, subject: "math" },
+            4: { label: "Math — Module 2", count: 24, seconds: 35 * 60, subject: "math" }
+        };
+
+        const DIFFICULTY_WEIGHTS = { Easy: 1.0, Medium: 1.5, Hard: 2.0 };
+        const MAX_WEIGHTS = { M1: 33.0, M2H: 36.85, M2L: 29.7 };
+
+        // --- STATE ---
+        let state = {
+            stage: 1,
+            phase: 'loading',
+            questions: [],
+            answers: {}, // Question index -> Letter
+            freeText: {}, // Question index -> String
+            marked: new Set(),
+            currentIndex: 0,
+            timerSec: 1920,
+            moduleCorrectCounts: {},
+            moduleWeightedScores: {},
+            finalRW: 0,
+            finalMath: 0,
+            seenIds: new Set()
+        };
+
+        let supabase = (SUPABASE_URL && SUPABASE_KEY) ? supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
+        let timerInterval = null;
+        let desmosInstance = null;
+
+        // --- CORE FUNCTIONS ---
+        
+        async function loadStage(s) {
+            setPhase('loading');
+            state.stage = s;
+            state.currentIndex = 0;
+            state.answers = {};
+            state.freeText = {};
+            state.marked = new Set();
+            state.timerSec = STAGE_CONFIG[s].seconds;
+
+            try {
+                const qs = await fetchQuestionsFromDB(s);
+                state.questions = qs;
+            } catch (err) {
+                console.error("DB failed, using mock data", err);
+                state.questions = getMockQuestions(STAGE_CONFIG[s].subject, 24);
+            }
+            
+            setPhase('testing');
+            startTimer();
+            render();
+        }
+
+        async function fetchQuestionsFromDB(s) {
+            if(!supabase) throw "No Supabase";
+            const cfg = STAGE_CONFIG[s];
+            const isMath = cfg.subject === 'math';
+            
+            // This is a simplified fetch - normally we'd do difficulty balance here
+            const domains = isMath ? ['Heart_of_Algebra', 'Advanced_Math', 'Problem_Solving_Data', 'Geometry_Trigonometry'] : ['Information_Ideas', 'Craft_Structure', 'Expression_Ideas', 'Standard_English'];
+            
+            const { data, error } = await supabase.from('sat_question_bank').select('*').in('domain', domains).limit(100);
+            if(error) throw error;
+            
+            // Shuffle and pick 24
+            let pool = data.sort(() => Math.random() - 0.5);
+            return pool.slice(0, 24);
+        }
+
+        function calculateScores() {
+            const currentQuestions = state.questions;
+            let weighted = 0;
+            let correct = 0;
+
+            for(let i=0; i < 22; i++) { // Scored questions only
+                const q = currentQuestions[i];
+                if(!q) continue;
+                const userAns = (state.answers[i] || state.freeText[i] || "").trim().toLowerCase();
+                const dbAns = (q.correct_answer || "").trim().toLowerCase();
+                
+                let isCorrect = (userAns === dbAns);
+                // Handle choice patterns
+                if(q.options && ['a','b','c','d'].includes(userAns)) {
+                    const idx = ['a','b','c','d'].indexOf(userAns);
+                    const optText = q.options[idx]?.toLowerCase();
+                    if(optText && optText === dbAns) isCorrect = true;
+                }
+
+                if(isCorrect) {
+                  correct++;
+                  weighted += DIFFICULTY_WEIGHTS[q.difficulty || "Medium"];
+                }
+            }
+            
+            state.moduleCorrectCounts[state.stage] = correct;
+            state.moduleWeightedScores[state.stage] = weighted;
+
+            if (state.stage === 2) {
+                const isHigh = (state.moduleCorrectCounts[1] / 24) >= 0.7;
+                state.finalRW = calculateScaled(state.moduleWeightedScores[1], weighted, isHigh);
+            } else if (state.stage === 4) {
+                const isHigh = (state.moduleCorrectCounts[3] / 24) >= 0.7;
+                state.finalMath = calculateScaled(state.moduleWeightedScores[3], weighted, isHigh);
+            }
+        }
+
+        function calculateScaled(m1, m2, isHigh) {
+            const total = m1 + m2;
+            const max = isHigh ? (MAX_WEIGHTS.M1 + MAX_WEIGHTS.M2H) : (MAX_WEIGHTS.M1 + MAX_WEIGHTS.M2L);
+            const range = isHigh ? 600 : 400;
+            const score = 200 + (total/max) * range;
+            return Math.round(score/10) * 10;
+        }
+
+        // --- UI CORE ---
+
+        function render() {
+            if(state.phase === 'loading') {
+                document.getElementById('loading-overlay').classList.remove('hidden');
+                return;
+            }
+            document.getElementById('loading-overlay').classList.add('hidden');
+
+            const q = state.questions[state.currentIndex];
+            if(!q) return;
+
+            // Header info
+            document.getElementById('stage-label').innerText = STAGE_CONFIG[state.stage].label;
+            document.getElementById('q-number').innerText = state.currentIndex + 1;
+
+            // Question Panels
+            const promptPanel = document.getElementById('prompt-panel');
+            const questionText = document.getElementById('question-text');
+            const optionsContainer = document.getElementById('options-container');
+            const sprContainer = document.getElementById('spr-container');
+
+            if(q.raw_original_text && state.stage <= 2) {
+                promptPanel.classList.remove('hidden');
+                document.getElementById('prompt-text').innerHTML = q.raw_original_text;
+            } else {
+                promptPanel.classList.add('hidden');
+            }
+
+            questionText.innerText = q.question_text;
+            
+            // Options
+            optionsContainer.innerHTML = '';
+            if(q.options && q.options.length > 0) {
+                sprContainer.classList.add('hidden');
+                optionsContainer.classList.remove('hidden');
+                q.options.forEach((opt, i) => {
+                    const letter = String.fromCharCode(65 + i);
+                    const isSelected = state.answers[state.currentIndex] === letter.toLowerCase();
+                    const btn = document.createElement('div');
+                    btn.className = `option-btn ${isSelected ? 'selected' : ''}`;
+                    btn.innerHTML = `
+                        <div class="option-letter">${letter}</div>
+                        <div class="text-[15px] pt-0.5">${opt}</div>
+                    `;
+                    btn.onclick = () => {
+                        state.answers[state.currentIndex] = letter.toLowerCase();
+                        render();
+                    };
+                    optionsContainer.appendChild(btn);
+                });
+            } else {
+                optionsContainer.classList.add('hidden');
+                sprContainer.classList.remove('hidden');
+                const inp = document.getElementById('spr-input');
+                inp.value = state.freeText[state.currentIndex] || '';
+                inp.oninput = (e) => state.freeText[state.currentIndex] = e.target.value;
+            }
+
+            // Mark for Review
+            const markBtn = document.getElementById('mark-btn');
+            markBtn.style.color = state.marked.has(state.currentIndex) ? '#f59e0b' : '#64748b';
+
+            // Navigation status
+            document.getElementById('prev-btn').disabled = state.currentIndex === 0;
+            document.getElementById('next-btn').innerText = (state.currentIndex === state.questions.length - 1) ? 'Finish' : 'Next';
+            
+            lucide.createIcons();
+        }
+
+        function setPhase(p) {
+            state.phase = p;
+            document.getElementById('between-screen').classList.toggle('hidden', p !== 'between');
+            document.getElementById('results-screen').classList.toggle('hidden', p !== 'complete');
+            if(p === 'complete') {
+                document.getElementById('total-score').innerText = state.finalRW + state.finalMath;
+                document.getElementById('rw-score').innerText = state.finalRW;
+                document.getElementById('math-score').innerText = state.finalMath;
+            }
+            render();
+        }
+
+        // --- EVENT HANDLERS ---
+
+        document.getElementById('next-btn').onclick = () => {
+            if(state.currentIndex < state.questions.length - 1) {
+                state.currentIndex++;
+                render();
+            } else {
+                handleModuleEnd();
+            }
+        };
+
+        document.getElementById('prev-btn').onclick = () => {
+            if(state.currentIndex > 0) {
+                state.currentIndex--;
+                render();
+            }
+        };
+
+        document.getElementById('mark-btn').onclick = () => {
+            if(state.marked.has(state.currentIndex)) state.marked.delete(state.currentIndex);
+            else state.marked.add(state.currentIndex);
+            render();
+        };
+
+        function handleModuleEnd() {
+            clearInterval(timerInterval);
+            calculateScores();
+            if(state.stage < 4) {
+                setPhase('between');
+                document.getElementById('between-title').innerText = STAGE_CONFIG[state.stage].label;
+            } else {
+                setPhase('complete');
+            }
+        }
+
+        document.getElementById('resume-btn').onclick = () => {
+            loadStage(state.stage + 1);
+        };
+
+        // --- TIMER ---
+        function startTimer() {
+            if(timerInterval) clearInterval(timerInterval);
+            const display = document.getElementById('timer-display');
+            timerInterval = setInterval(() => {
+                state.timerSec--;
+                if(state.timerSec <= 0) handleModuleEnd();
+                const m = Math.floor(state.timerSec / 60);
+                const s = state.timerSec % 60;
+                display.innerText = `${m}:${s.toString().padStart(2, '0')}`;
+            }, 1000);
+        }
+
+        document.getElementById('toggle-timer').onclick = () => {
+            const display = document.getElementById('timer-display');
+            const hideTxt = document.getElementById('timer-hide-text');
+            if(display.style.visibility === 'hidden') {
+                display.style.visibility = 'visible';
+                hideTxt.innerText = 'Hide';
+            } else {
+                display.style.visibility = 'hidden';
+                hideTxt.innerText = 'Show';
+            }
+        };
+
+        // --- DESMOS LOGIC ---
+        const dToggle = document.getElementById('desmos-toggle');
+        const dCont = document.getElementById('desmos-container');
+        dToggle.onclick = () => {
+            dCont.style.display = (dCont.style.display === 'block') ? 'none' : 'block';
+            if(!desmosInstance && window.Desmos) {
+                desmosInstance = Desmos.GraphingCalculator(document.getElementById('desmos-mount'), { keypad: true });
+            }
+        };
+        document.getElementById('desmos-close').onclick = () => dCont.style.display = 'none';
+
+        // Draggable Logic
+        let offset = [0,0];
+        let isDown = false;
+        dCont.addEventListener('mousedown', (e) => {
+            if (e.target.closest('.desmos-handle')) {
+                isDown = true;
+                offset = [ dCont.offsetLeft - e.clientX, dCont.offsetTop - e.clientY ];
+            }
+        }, true);
+        document.addEventListener('mouseup', () => isDown = false);
+        document.addEventListener('mousemove', (e) => {
+            if (isDown) {
+                dCont.style.left = (e.clientX + offset[0]) + 'px';
+                dCont.style.top  = (e.clientY + offset[1]) + 'px';
+                dCont.style.bottom = 'auto'; dCont.style.right = 'auto';
+            }
+        });
+
+        // --- MOCK DATA FALLBACK ---
+        function getMockQuestions(subj, count) {
+            const pool = (subj === 'math') ? [
+              { question_text: "If 3x + 5 = 20, what is x?", correct_answer: "5", difficulty: "Easy" },
+              { question_text: "What is 15% of 200?", options: ["20","30","40","50"], correct_answer: "B", difficulty: "Medium" }
+            ] : [
+              { question_text: "Which word best fits the blank?", options: ["pivotal","redundant","sporadic","peripheral"], correct_answer: "A", difficulty: "Medium", raw_original_text: "The discovery was ______ to science." }
+            ];
+            let res = [];
+            for(let i=0; i<count; i++) res.push({...pool[i%pool.length], id: 'mock-'+i});
+            return res;
+        }
+
+        // Init
+        window.onload = () => {
+            loadStage(1);
+            lucide.createIcons();
+        };
+
+    </script>
+</body>
+</html>
