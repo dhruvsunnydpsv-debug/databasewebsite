@@ -51,35 +51,46 @@
         .option-btn {
             display: flex;
             align-items: flex-start;
-            gap: 12px;
-            padding: 12px 16px;
-            border: 1.5px solid #e2e8f0;
-            border-radius: 8px;
+            gap: 16px;
+            padding: 18px 20px;
+            border: 2px solid transparent;
+            border-radius: 20px;
             cursor: pointer;
-            transition: all 0.1s ease;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
             text-align: left;
+            background: rgba(255, 255, 255, 0.6);
+            backdrop-filter: blur(8px);
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
         }
         .option-btn.selected {
-            border-color: #3b82f6;
-            background-color: #eff6ff;
+            border-color: #1a1a2e;
+            background: rgba(26, 26, 46, 0.05);
+            transform: scale(1.02);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1);
         }
         .option-letter {
             flex-shrink: 0;
-            width: 24px;
-            height: 24px;
-            border-radius: 50%;
-            border: 2px solid #94a3b8;
+            width: 32px;
+            height: 32px;
+            border-radius: 10px;
+            border: 2px solid rgba(26, 26, 46, 0.2);
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 12px;
-            font-weight: 700;
-            color: #64748b;
+            font-size: 14px;
+            font-weight: 800;
+            color: rgba(26, 26, 46, 0.6);
+            transition: all 0.2s ease;
         }
         .option-btn.selected .option-letter {
-            border-color: #3b82f6;
-            background-color: #3b82f6;
+            background-color: #1a1a2e;
+            border-color: #1a1a2e;
             color: white;
+            box-shadow: 0 4px 12px rgba(26, 26, 46, 0.3);
+        }
+        .option-btn:hover:not(.selected) {
+            background: rgba(255, 255, 255, 0.9);
+            border-color: rgba(26, 26, 46, 0.1);
         }
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
@@ -143,37 +154,34 @@
     <main class="flex-grow flex flex-col bg-[#F1F5F9] overflow-hidden p-6 gap-6">
         
         <!-- Question Area -->
-        <div class="flex-grow flex gap-6 max-w-[1400px] mx-auto w-full overflow-hidden">
+        <div class="flex-grow flex gap-8 max-w-[1400px] mx-auto w-full overflow-hidden">
             
-            <!-- Left Side: Prompt (For RW) -->
-            <div id="prompt-panel" class="w-1/2 bluebook-card p-8 overflow-y-auto no-scrollbar hidden">
-                <div id="prompt-text" class="text-[17px] leading-[1.65] text-[#1e293b] font-medium serif-text"></div>
+            <!-- Left Side: Prompt (For RW) - glassmorphic -->
+            <div id="prompt-panel" class="w-1/2 bg-white/70 backdrop-blur-md rounded-[32px] border border-white/20 shadow-xl p-10 overflow-y-auto no-scrollbar hidden">
+                <div id="prompt-text" class="text-[18px] leading-[1.7] text-[#1e293b] font-medium serif-text"></div>
             </div>
 
-            <!-- Right Side: Question & Options -->
-            <div id="question-panel" class="flex-grow bluebook-card flex flex-col overflow-hidden">
-                <div class="flex items-center justify-between p-4 border-b">
-                    <div class="flex items-center gap-3">
-                        <span id="q-number" class="bg-[#1E2532] text-white w-8 h-8 flex items-center justify-center rounded font-bold">1</span>
-                        <button id="mark-btn" class="flex items-center gap-2 text-sm font-medium text-gray-500 hover:text-black">
+            <!-- Right Side: Question & Options - glassmorphic -->
+            <div id="question-panel" class="flex-grow bg-white/60 backdrop-blur-md rounded-[32px] border border-white/20 shadow-xl flex flex-col overflow-hidden">
+                <div class="flex items-center justify-between p-6 border-b border-black/5 bg-white/40">
+                    <div class="flex items-center gap-4">
+                        <span id="q-number" class="bg-[#1a1a2e] text-white w-10 h-10 flex items-center justify-center rounded-2xl font-black text-lg shadow-lg">1</span>
+                        <button id="mark-btn" class="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 hover:text-black transition-colors">
                             <i data-lucide="bookmark" class="w-4 h-4"></i> Mark for Review
                         </button>
                     </div>
-                    <div class="flex gap-2">
-                        <button id="strike-toggle" class="p-2 border rounded hover:bg-gray-50"><i data-lucide="strikethrough" class="w-4 h-4"></i></button>
-                    </div>
                 </div>
 
-                <div class="flex-grow overflow-y-auto p-8">
-                    <div id="question-text" class="text-lg font-bold text-[#1e293b] mb-8 leading-relaxed"></div>
+                <div class="flex-grow overflow-y-auto p-10">
+                    <div id="question-text" class="text-[20px] font-bold text-[#1e293b] mb-10 leading-tight"></div>
                     
                     <!-- Multiple Choice Container -->
-                    <div id="options-container" class="flex flex-col gap-3"></div>
+                    <div id="options-container" class="flex flex-col gap-4"></div>
 
                     <!-- Student Produced Response (Math) -->
                     <div id="spr-container" class="hidden">
-                        <p class="text-sm font-bold text-gray-500 mb-2">Student Produced Response</p>
-                        <input type="text" id="spr-input" placeholder="Enter your answer" class="w-full max-w-xs p-3 border-2 border-slate-300 rounded-lg text-lg font-mono focus:border-blue-600 outline-none">
+                        <p class="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mb-4">Response Entry</p>
+                        <input type="text" id="spr-input" placeholder="Value" class="w-full max-w-xs p-5 border-2 border-black/5 bg-white/50 rounded-2xl text-2xl font-mono font-bold focus:border-[#1a1a2e] outline-none shadow-inner transition-all">
                     </div>
                 </div>
             </div>
@@ -374,26 +382,28 @@
             const q = state.questions[state.currentIndex];
             if(!q) return;
 
-            // Header info
-            document.getElementById('stage-label').innerText = STAGE_CONFIG[state.stage].label;
-            document.getElementById('q-number').innerText = state.currentIndex + 1;
-
-            // Question Panels
+            // Updated Layout Logic: Flip Panes
             const promptPanel = document.getElementById('prompt-panel');
             const questionText = document.getElementById('question-text');
             const optionsContainer = document.getElementById('options-container');
             const sprContainer = document.getElementById('spr-container');
 
+            // Header info
+            document.getElementById('stage-label').innerText = STAGE_CONFIG[state.stage].label;
+            document.getElementById('q-number').innerText = state.currentIndex + 1;
+
+            // Rationale/Prompt Display (Removing Hint Box)
             if(q.raw_original_text && state.stage <= 2) {
                 promptPanel.classList.remove('hidden');
                 document.getElementById('prompt-text').innerHTML = q.raw_original_text;
             } else {
                 promptPanel.classList.add('hidden');
+                // If no raw text but we have question text, we might want to split or just show as is
             }
 
-            questionText.innerText = q.question_text;
+            questionText.innerText = q.question_text || "Question content is being processed...";
             
-            // Options
+            // Options Rendering with New Styling
             optionsContainer.innerHTML = '';
             if(q.options && q.options.length > 0) {
                 sprContainer.classList.add('hidden');
@@ -405,7 +415,7 @@
                     btn.className = `option-btn ${isSelected ? 'selected' : ''}`;
                     btn.innerHTML = `
                         <div class="option-letter">${letter}</div>
-                        <div class="text-[15px] pt-0.5">${opt}</div>
+                        <div class="text-[16px] pt-1 font-medium text-[#1e293b]">${opt}</div>
                     `;
                     btn.onclick = () => {
                         state.answers[state.currentIndex] = letter.toLowerCase();

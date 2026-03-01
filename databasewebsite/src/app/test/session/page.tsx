@@ -43,6 +43,7 @@ interface ModuleReview {
 
 const CHOICE_LETTERS = ["A", "B", "C", "D"] as const;
 
+// ─── Utilities ────────────────────────────────────────────────
 function isUserResponseCorrect(q: Question, rawUserAnswer: string): boolean {
     const ansLetter = rawUserAnswer.trim().toLowerCase();
     const dbAns = (q.correct_answer || "").trim().toLowerCase();
@@ -494,36 +495,57 @@ export default function BluebookSession() {
             </header>
 
             {/* 2. SPLIT SCREEN BODY */}
-            <main className="flex-1 flex overflow-hidden border-t-2 border-black">
-                {/* Left Pane: Answer Choices */}
-                <div className="w-1/2 overflow-y-auto border-r-2 border-gray-300 bg-white">
-                    <div className="p-10 max-w-2xl mx-auto h-full">
-                        <div className="flex items-baseline gap-3 mb-6">
-                            <span className="text-sm font-bold bg-black text-white px-3 py-1 pb-1.5 rounded inline-block shadow-sm">
+            <main className="flex-1 flex overflow-hidden border-t-2 border-[#1a1a2e] bg-[#f8fafc]">
+                {/* Left Pane: Question & Prompt Text (WAS RIGHT) */}
+                <div className="w-1/2 overflow-y-auto border-r border-[#1a1a2e]/10 bg-white/70 backdrop-blur-md">
+                    <div className="p-12 max-w-2xl mx-auto h-full">
+                        {!currentQ.is_placeholder && (
+                            <div className="text-[1.1rem] font-medium leading-[1.7] mb-8 text-[#1a1a1a] select-text">
+                                {currentQ.question_text}
+                            </div>
+                        )}
+
+                        {currentQ.raw_original_text && (
+                            <div className="text-[1.1rem] leading-[1.7] text-[#1a1a1a] font-serif select-text text-justify border border-black/5 rounded-3xl p-10 bg-white/50 backdrop-blur-sm shadow-xl ring-1 ring-black/5">
+                                {currentQ.raw_original_text}
+                            </div>
+                        )}
+                        
+                        {!currentQ.raw_original_text && !currentQ.is_placeholder && !currentQ.question_text && (
+                             <div className="text-gray-400 italic">No context available for this question.</div>
+                        )}
+                    </div>
+                </div>
+
+                {/* Right Pane: Answer Choices (WAS LEFT) */}
+                <div className="w-1/2 overflow-y-auto bg-[#f8fafc]/30 backdrop-blur-sm">
+                    <div className="p-12 max-w-xl mx-auto h-full">
+                        <div className="flex items-center gap-4 mb-10">
+                            <span className="w-10 h-10 flex items-center justify-center bg-[#1a1a2e] text-white rounded-xl shadow-lg font-bold text-lg">
                                 {currentIndex + 1}
                             </span>
-                            <span className="text-xs font-bold uppercase tracking-widest text-gray-500">Answer Choices</span>
+                            <span className="text-[10px] font-black uppercase tracking-[0.25em] text-[#1a1a2e]/40">Answer Selection</span>
                         </div>
 
                         {currentQ.is_placeholder ? (
-                            <div className="border border-red-300 rounded p-6 bg-red-50 text-red-700 font-bold max-w-sm">
-                                Warning: Missing Array Data
+                            <div className="glass-card border border-red-200/50 rounded-3xl p-10 bg-red-50/50 text-red-700 font-bold backdrop-blur-md">
+                                Warning: Question Metadata Unavailable
                             </div>
                         ) : currentQ.options && currentQ.options.length > 0 ? (
-                            <fieldset className="space-y-3">
+                            <fieldset className="space-y-4">
                                 {currentQ.options.map((opt: string, idx: number) => {
                                     const letter = CHOICE_LETTERS[idx];
                                     const selected = answers[currentIndex] === letter;
                                     return (
                                         <label
                                             key={idx}
-                                            className={`flex items-start p-4 rounded-xl cursor-pointer transition-all border-2 group shadow-sm ${selected ? 'bg-[#f4f7fb] border-[#0c59a4]' : 'bg-white border-gray-300 hover:border-[#8cbced]'}`}
+                                            className={`flex items-start p-6 rounded-2xl cursor-pointer transition-all border-2 group shadow-sm backdrop-blur-md ${selected ? 'bg-[#1a1a2e]/5 border-[#1a1a2e] ring-1 ring-[#1a1a2e]' : 'bg-white/80 border-transparent hover:border-[#1a1a2e]/20 hover:bg-white'}`}
                                         >
                                             <input type="radio" name="answer" className="hidden" onChange={() => setAnswers(prev => ({ ...prev, [currentIndex]: letter }))} checked={selected} />
-                                            <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center font-bold mr-4 shrink-0 transition-colors shadow-sm ${selected ? 'bg-[#0c59a4] text-white border-[#0c59a4]' : 'border-gray-400 text-gray-700 bg-gray-50 group-hover:bg-[#ebf3fa] group-hover:border-[#0c59a4] group-hover:text-[#0c59a4]'}`}>
+                                            <div className={`w-9 h-9 rounded-xl border-2 flex items-center justify-center font-bold mr-5 shrink-0 transition-all ${selected ? 'bg-[#1a1a2e] text-white border-[#1a1a2e] shadow-md scale-105' : 'border-[#1a1a2e]/20 text-[#1a1a2e]/40 bg-white group-hover:bg-white'}`}>
                                                 {letter}
                                             </div>
-                                            <span className="text-base text-[#1a1a1a] leading-snug pt-1 select-text">
+                                            <span className={`text-[1.1rem] leading-relaxed pt-1.5 transition-colors ${selected ? 'text-[#1a1a2e] font-semibold' : 'text-gray-700'}`}>
                                                 {opt}
                                             </span>
                                         </label>
@@ -531,33 +553,18 @@ export default function BluebookSession() {
                                 })}
                             </fieldset>
                         ) : (
-                            <div className="border border-gray-300 rounded p-6 bg-gray-50 max-w-sm">
-                                <label className="block text-sm font-bold text-gray-700 mb-2 uppercase tracking-wide">Student-Produced Response</label>
+                            <div className="bg-white/80 backdrop-blur-md p-10 rounded-3xl border border-black/5 shadow-2xl ring-1 ring-black/5">
+                                <label className="block text-[10px] font-black text-[#1a1a2e]/40 mb-5 uppercase tracking-[0.25em]">Response Input</label>
                                 <input
                                     type="text"
                                     value={freeText[currentIndex] ?? ""}
                                     onChange={e => setFreeText(prev => ({ ...prev, [currentIndex]: e.target.value }))}
-                                    placeholder="Enter your answer"
+                                    placeholder="Value"
                                     maxLength={5}
-                                    className="w-full px-4 py-3 border-2 border-gray-400 rounded text-xl text-center outline-none focus:border-[#0c59a4] focus:ring-1 focus:ring-[#0c59a4] font-semibold tracking-widest shadow-inner select-text"
+                                    className="w-full px-8 py-5 border-2 border-black/10 rounded-2xl text-3xl text-center outline-none focus:border-[#1a1a2e] focus:ring-8 focus:ring-[#1a1a2e]/5 font-mono font-bold tracking-[0.1em] shadow-inner bg-white/50"
                                 />
                             </div>
                         )}
-                    </div>
-                </div>
-
-                {/* Right Pane: Question Text */}
-                <div className="w-1/2 overflow-y-auto bg-white relative">
-                    <div className="p-10 max-w-2xl mx-auto h-full">
-                        {!currentQ.is_placeholder && (
-                            <div className="text-[1.05rem] font-medium leading-relaxed mb-8 text-[#1a1a1a] select-text">
-                                {currentQ.question_text}
-                            </div>
-                        )}
-
-                        <div className="text-[1.05rem] leading-relaxed text-[#1a1a1a] font-serif select-text text-justify border border-gray-200 rounded-xl p-6 bg-gray-50">
-                            {currentQ.rationale || currentQ.raw_original_text || "Read the following text and answer the question."}
-                        </div>
                     </div>
                 </div>
             </main>
