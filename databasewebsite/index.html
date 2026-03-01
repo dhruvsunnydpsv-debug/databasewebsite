@@ -80,38 +80,27 @@
   </head>
   <body class="font-sans">
     <!-- ── Navigation ── -->
-    <nav
-      id="navbar"
-      class="w-full h-[70px] flex items-center justify-between px-6 sm:px-10 sticky top-0 z-50 transition-all duration-300 bg-transparent border-b border-transparent"
-    >
-      <div class="font-serif text-2xl font-black tracking-tighter text-ink">
-        SAT Engine
-      </div>
-      <div class="flex items-center gap-6">
-        <a
-          href="#domains"
-          class="hidden sm:block text-sm font-medium text-gray-500 hover:text-black transition-colors"
-        >
-          Curriculum
-        </a>
-        <a
-          href="practice.html"
-          class="px-6 py-2 bg-ink text-cream rounded-full text-sm font-bold hover:bg-black hover:-translate-y-0.5 transition-all shadow-md"
-        >
-          Sign In →
-        </a>
-      </div>
+    <nav id="navbar" class="w-full h-[70px] flex items-center justify-between px-6 sm:px-10 sticky top-0 z-50 transition-all duration-300 bg-transparent border-b border-transparent">
+        <div class="font-serif text-2xl font-black tracking-tighter text-ink">
+            SAT Engine
+        </div>
+        <div class="flex items-center gap-6">
+            <a href="#domains" class="hidden sm:block text-sm font-medium text-gray-500 hover:text-black transition-colors rounded-full px-4 py-2 hover:bg-black/5">
+                Curriculum
+            </a>
+            <a href="practice.html" class="px-8 py-2.5 bg-ink text-cream rounded-full text-sm font-bold hover:bg-black hover:-translate-y-0.5 transition-all shadow-lg active:scale-95">
+                Sign In →
+            </a>
+        </div>
     </nav>
 
     <!-- ── Hero Section ── -->
     <main
       class="w-full max-w-5xl mx-auto flex flex-col items-center justify-center text-center px-6 pt-32 pb-24 gap-8 z-10"
     >
-      <div
-        class="px-5 py-2 border border-black/10 rounded-full bg-white/60 backdrop-blur-sm text-xs font-bold tracking-widest uppercase text-gray-500 shadow-sm"
-      >
-        The Gold Standard in Digital SAT Preparation
-      </div>
+        <div class="px-6 py-2.5 border border-black/5 rounded-full bg-white/90 backdrop-blur-sm text-[10px] font-black tracking-[0.2em] uppercase text-gray-400 shadow-sm">
+            The Gold Standard in Digital SAT Preparation
+        </div>
 
       <h1
         class="font-serif text-5xl sm:text-6xl md:text-7xl font-black leading-[1.05] tracking-tight text-ink w-full"
@@ -129,11 +118,8 @@
       </p>
 
       <div class="flex flex-wrap gap-4 justify-center mt-6">
-        <a
-          href="practice.html"
-          class="px-10 py-4 bg-lavender text-black font-bold text-lg rounded-full border border-black shadow-[0_4px_14px_rgba(230,213,248,0.4),inset_0_-2px_0_rgba(0,0,0,0.1)] hover:shadow-[0_8px_24px_rgba(230,213,248,0.6),inset_0_-2px_0_rgba(0,0,0,0.1)] hover:-translate-y-1 transition-all active:translate-y-0"
-        >
-          View Question Bank →
+        <a href="practice.html" class="px-12 py-5 bg-lavender text-black font-black text-lg rounded-full border border-black/10 shadow-[0_10px_30px_-10px_rgba(230,213,248,0.8)] hover:shadow-[0_15px_40px_-10px_rgba(230,213,248,1)] hover:-translate-y-1.5 transition-all active:scale-95 active:translate-y-0">
+            View Question Bank →
         </a>
       </div>
     </main>
@@ -217,131 +203,66 @@
           class="w-full grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
         >
           <!-- Domain Cards -->
-          <div
-            class="group flex flex-col p-8 bg-white border border-black/10 rounded-2xl cursor-pointer hover:-translate-y-2 hover:shadow-2xl hover:border-black/30 transition-all duration-300 ease-out relative overflow-hidden"
-          >
-            <div
-              class="absolute -top-10 -right-10 w-40 h-40 rounded-full opacity-0 group-hover:opacity-40 blur-3xl transition-opacity duration-300 bg-[#D4EFD4]"
-            ></div>
-            <div class="flex justify-between items-start mb-8 z-10">
-              <div class="text-4xl text-ink font-light">∑</div>
-              <span
-                class="px-3 py-1 text-[10px] font-bold uppercase tracking-wider rounded-full border border-black/10 bg-[#D4EFD4] shadow-sm"
-                >Math</span
-              >
-            </div>
-            <h3 class="font-serif text-2xl font-bold text-ink mb-3 z-10">
-              Heart of Algebra
-            </h3>
-            <p class="text-gray-600 leading-relaxed font-medium z-10 text-sm">
-              Linear equations, inequalities, and graphing deeply analyzed.
-            </p>
-          </div>
-          <!-- card 2 -->
-          <div
-            class="group flex flex-col p-8 bg-white border border-black/10 rounded-2xl cursor-pointer hover:-translate-y-2 hover:shadow-2xl hover:border-black/30 transition-all duration-300 ease-out relative overflow-hidden"
-          >
-            <div
-              class="absolute -top-10 -right-10 w-40 h-40 rounded-full opacity-0 group-hover:opacity-40 blur-3xl transition-opacity duration-300 bg-[#D4EFD4]"
-            ></div>
-            <div class="flex justify-between items-start mb-8 z-10">
-              <div class="text-4xl text-ink font-light">ƒ</div>
-              <span
-                class="px-3 py-1 text-[10px] font-bold uppercase tracking-wider rounded-full border border-black/10 bg-[#D4EFD4] shadow-sm"
-                >Math</span
-              >
-            </div>
-            <h3 class="font-serif text-2xl font-bold text-ink mb-3 z-10">
-              Advanced Math
-            </h3>
-            <p class="text-gray-600 leading-relaxed font-medium z-10 text-sm">
-              Quadratics, polynomials, and complex non-linear functions.
-            </p>
-          </div>
-          <!-- card 3 -->
-          <div
-            class="group flex flex-col p-8 bg-white border border-black/10 rounded-2xl cursor-pointer hover:-translate-y-2 hover:shadow-2xl hover:border-black/30 transition-all duration-300 ease-out relative overflow-hidden"
-          >
-            <div
-              class="absolute -top-10 -right-10 w-40 h-40 rounded-full opacity-0 group-hover:opacity-40 blur-3xl transition-opacity duration-300 bg-[#D4EFD4]"
-            ></div>
-            <div class="flex justify-between items-start mb-8 z-10">
-              <div class="text-4xl text-ink font-light">△</div>
-              <span
-                class="px-3 py-1 text-[10px] font-bold uppercase tracking-wider rounded-full border border-black/10 bg-[#D4EFD4] shadow-sm"
-                >Math</span
-              >
-            </div>
-            <h3 class="font-serif text-2xl font-bold text-ink mb-3 z-10">
-              Geometry & Trig
-            </h3>
-            <p class="text-gray-600 leading-relaxed font-medium z-10 text-sm">
-              Area, volume, trigonometry, and circle theorems.
-            </p>
-          </div>
-          <!-- card 4 -->
-          <div
-            class="group flex flex-col p-8 bg-white border border-black/10 rounded-2xl cursor-pointer hover:-translate-y-2 hover:shadow-2xl hover:border-black/30 transition-all duration-300 ease-out relative overflow-hidden"
-          >
-            <div
-              class="absolute -top-10 -right-10 w-40 h-40 rounded-full opacity-0 group-hover:opacity-40 blur-3xl transition-opacity duration-300 bg-lavender"
-            ></div>
-            <div class="flex justify-between items-start mb-8 z-10">
-              <div class="text-4xl text-ink font-light">¶</div>
-              <span
-                class="px-3 py-1 text-[10px] font-bold uppercase tracking-wider rounded-full border border-black/10 bg-lavender shadow-sm"
-                >Reading & Writing</span
-              >
-            </div>
-            <h3 class="font-serif text-2xl font-bold text-ink mb-3 z-10">
-              Craft & Structure
-            </h3>
-            <p class="text-gray-600 leading-relaxed font-medium z-10 text-sm">
-              Words in context, text purpose, and dual-passage synthesis.
-            </p>
-          </div>
-          <!-- card 5 -->
-          <div
-            class="group flex flex-col p-8 bg-white border border-black/10 rounded-2xl cursor-pointer hover:-translate-y-2 hover:shadow-2xl hover:border-black/30 transition-all duration-300 ease-out relative overflow-hidden"
-          >
-            <div
-              class="absolute -top-10 -right-10 w-40 h-40 rounded-full opacity-0 group-hover:opacity-40 blur-3xl transition-opacity duration-300 bg-lavender"
-            ></div>
-            <div class="flex justify-between items-start mb-8 z-10">
-              <div class="text-4xl text-ink font-light">✎</div>
-              <span
-                class="px-3 py-1 text-[10px] font-bold uppercase tracking-wider rounded-full border border-black/10 bg-lavender shadow-sm"
-                >Reading & Writing</span
-              >
-            </div>
-            <h3 class="font-serif text-2xl font-bold text-ink mb-3 z-10">
-              Expression of Ideas
-            </h3>
-            <p class="text-gray-600 leading-relaxed font-medium z-10 text-sm">
-              Rhetorical synthesis and transition mechanics.
-            </p>
-          </div>
-          <!-- card 6 -->
-          <div
-            class="group flex flex-col p-8 bg-white border border-black/10 rounded-2xl cursor-pointer hover:-translate-y-2 hover:shadow-2xl hover:border-black/30 transition-all duration-300 ease-out relative overflow-hidden"
-          >
-            <div
-              class="absolute -top-10 -right-10 w-40 h-40 rounded-full opacity-0 group-hover:opacity-40 blur-3xl transition-opacity duration-300 bg-lavender"
-            ></div>
-            <div class="flex justify-between items-start mb-8 z-10">
-              <div class="text-4xl text-ink font-light">◉</div>
-              <span
-                class="px-3 py-1 text-[10px] font-bold uppercase tracking-wider rounded-full border border-black/10 bg-lavender shadow-sm"
-                >Reading & Writing</span
-              >
-            </div>
-            <h3 class="font-serif text-2xl font-bold text-ink mb-3 z-10">
-              Information & Ideas
-            </h3>
-            <p class="text-gray-600 leading-relaxed font-medium z-10 text-sm">
-              Central ideas, inferences, and quantitative command of evidence.
-            </p>
-          </div>
+                <!-- Domain Cards -->
+                <div class="group flex flex-col p-10 bg-white/90 backdrop-blur-sm border border-black/5 rounded-[3rem] cursor-pointer hover:-translate-y-2 hover:shadow-[0_30px_60px_-12px_rgba(0,0,0,0.1)] transition-all duration-500 ease-out relative overflow-hidden">
+                    <div class="absolute -top-10 -right-10 w-40 h-40 rounded-full opacity-0 group-hover:opacity-10 blur-3xl transition-opacity duration-500 bg-green-400"></div>
+                    <div class="flex justify-between items-start mb-10 z-10">
+                        <div class="text-4xl text-ink font-light">∑</div>
+                        <span class="px-4 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-full border border-black/5 bg-green-50 shadow-sm">Math</span>
+                    </div>
+                    <h3 class="font-serif text-2xl font-black text-ink mb-4 z-10">Heart of Algebra</h3>
+                    <p class="text-gray-500 leading-relaxed font-medium z-10 text-sm">Linear equations, inequalities, and graphing deeply analyzed.</p>
+                </div>
+                <!-- card 2 -->
+                <div class="group flex flex-col p-10 bg-white/90 backdrop-blur-sm border border-black/5 rounded-[3rem] cursor-pointer hover:-translate-y-2 hover:shadow-[0_30px_60px_-12px_rgba(0,0,0,0.1)] transition-all duration-500 ease-out relative overflow-hidden">
+                    <div class="absolute -top-10 -right-10 w-40 h-40 rounded-full opacity-0 group-hover:opacity-10 blur-3xl transition-opacity duration-500 bg-green-400"></div>
+                    <div class="flex justify-between items-start mb-10 z-10">
+                        <div class="text-4xl text-ink font-light">ƒ</div>
+                        <span class="px-4 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-full border border-black/5 bg-green-50 shadow-sm">Math</span>
+                    </div>
+                    <h3 class="font-serif text-2xl font-black text-ink mb-4 z-10">Advanced Math</h3>
+                    <p class="text-gray-500 leading-relaxed font-medium z-10 text-sm">Quadratics, polynomials, and complex non-linear functions.</p>
+                </div>
+                <!-- card 3 -->
+                <div class="group flex flex-col p-10 bg-white/90 backdrop-blur-sm border border-black/5 rounded-[3rem] cursor-pointer hover:-translate-y-2 hover:shadow-[0_30px_60px_-12px_rgba(0,0,0,0.1)] transition-all duration-500 ease-out relative overflow-hidden">
+                    <div class="absolute -top-10 -right-10 w-40 h-40 rounded-full opacity-0 group-hover:opacity-10 blur-3xl transition-opacity duration-500 bg-green-400"></div>
+                    <div class="flex justify-between items-start mb-10 z-10">
+                        <div class="text-4xl text-ink font-light">△</div>
+                        <span class="px-4 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-full border border-black/5 bg-green-50 shadow-sm">Math</span>
+                    </div>
+                    <h3 class="font-serif text-2xl font-black text-ink mb-4 z-10">Geometry & Trig</h3>
+                    <p class="text-gray-500 leading-relaxed font-medium z-10 text-sm">Area, volume, trigonometry, and circle theorems.</p>
+                </div>
+                <!-- card 4 -->
+                <div class="group flex flex-col p-10 bg-white/90 backdrop-blur-sm border border-black/5 rounded-[3rem] cursor-pointer hover:-translate-y-2 hover:shadow-[0_30px_60px_-12px_rgba(0,0,0,0.1)] transition-all duration-500 ease-out relative overflow-hidden">
+                    <div class="absolute -top-10 -right-10 w-40 h-40 rounded-full opacity-0 group-hover:opacity-10 blur-3xl transition-opacity duration-500 bg-purple-400"></div>
+                    <div class="flex justify-between items-start mb-10 z-10">
+                        <div class="text-4xl text-ink font-light">¶</div>
+                        <span class="px-4 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-full border border-black/5 bg-lavender shadow-sm">Reading</span>
+                    </div>
+                    <h3 class="font-serif text-2xl font-black text-ink mb-4 z-10">Craft & Structure</h3>
+                    <p class="text-gray-500 leading-relaxed font-medium z-10 text-sm">Words in context, text purpose, and dual-passage synthesis.</p>
+                </div>
+                <!-- card 5 -->
+                <div class="group flex flex-col p-10 bg-white/90 backdrop-blur-sm border border-black/5 rounded-[3rem] cursor-pointer hover:-translate-y-2 hover:shadow-[0_30px_60px_-12px_rgba(0,0,0,0.1)] transition-all duration-500 ease-out relative overflow-hidden">
+                    <div class="absolute -top-10 -right-10 w-40 h-40 rounded-full opacity-0 group-hover:opacity-10 blur-3xl transition-opacity duration-500 bg-purple-400"></div>
+                    <div class="flex justify-between items-start mb-10 z-10">
+                        <div class="text-4xl text-ink font-light">✎</div>
+                        <span class="px-4 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-full border border-black/5 bg-lavender shadow-sm">Reading</span>
+                    </div>
+                    <h3 class="font-serif text-2xl font-black text-ink mb-4 z-10">Expression of Ideas</h3>
+                    <p class="text-gray-500 leading-relaxed font-medium z-10 text-sm">Rhetorical synthesis and transition mechanics.</p>
+                </div>
+                <!-- card 6 -->
+                <div class="group flex flex-col p-10 bg-white/90 backdrop-blur-sm border border-black/5 rounded-[3rem] cursor-pointer hover:-translate-y-2 hover:shadow-[0_30px_60px_-12px_rgba(0,0,0,0.1)] transition-all duration-500 ease-out relative overflow-hidden">
+                    <div class="absolute -top-10 -right-10 w-40 h-40 rounded-full opacity-0 group-hover:opacity-10 blur-3xl transition-opacity duration-500 bg-purple-400"></div>
+                    <div class="flex justify-between items-start mb-10 z-10">
+                        <div class="text-4xl text-ink font-light">◉</div>
+                        <span class="px-4 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-full border border-black/5 bg-lavender shadow-sm">Reading</span>
+                    </div>
+                    <h3 class="font-serif text-2xl font-black text-ink mb-4 z-10">Information & Ideas</h3>
+                    <p class="text-gray-500 leading-relaxed font-medium z-10 text-sm">Central ideas, inferences, and quantitative command of evidence.</p>
+                </div>
         </div>
       </div>
     </section>

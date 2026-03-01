@@ -19,7 +19,7 @@ export default function Home() {
             {/* ── Navigation ── */}
             <nav
                 className={`w-full h-[70px] flex items-center justify-between px-6 sm:px-10 sticky top-0 z-50 transition-all duration-300 ${scrolled
-                    ? "bg-[#FBFBF2]/90 backdrop-blur-md border-b border-black/10 shadow-sm"
+                    ? "bg-[#FBFBF2]/90 backdrop-blur-md border-b border-black/5 shadow-sm"
                     : "bg-transparent border-b border-transparent"
                     }`}
             >
@@ -29,13 +29,13 @@ export default function Home() {
                 <div className="flex items-center gap-6">
                     <a
                         href="#domains"
-                        className="hidden sm:block text-sm font-medium text-gray-500 hover:text-black transition-colors"
+                        className="hidden sm:block text-sm font-medium text-gray-500 hover:text-black transition-colors rounded-full px-4 py-2 hover:bg-black/5"
                     >
                         Curriculum
                     </a>
                     <a
                         href="/test/session/"
-                        className="px-6 py-2 bg-[#1A1A1A] text-[#FBFBF2] rounded-full text-sm font-bold hover:bg-black hover:-translate-y-0.5 transition-all shadow-md"
+                        className="px-8 py-2.5 bg-[#1A1A1A] text-[#FBFBF2] rounded-full text-sm font-bold hover:bg-black hover:-translate-y-0.5 transition-all shadow-lg active:scale-95"
                     >
                         Sign In →
                     </a>
@@ -44,7 +44,7 @@ export default function Home() {
 
             {/* ── Hero Section ── */}
             <main className="w-full max-w-5xl flex flex-col items-center justify-center text-center px-6 pt-32 pb-24 gap-8 z-10">
-                <div className="px-5 py-2 border border-black/10 rounded-full bg-white/60 backdrop-blur-sm text-xs font-bold tracking-widest uppercase text-gray-500 shadow-sm">
+                <div className="px-6 py-2.5 border border-black/5 rounded-full bg-white/90 backdrop-blur-sm text-[10px] font-black tracking-[0.2em] uppercase text-gray-400 shadow-sm">
                     The Gold Standard in Digital SAT Preparation
                 </div>
 
@@ -111,22 +111,22 @@ export default function Home() {
                         ].map((d, i) => (
                             <div
                                 key={i}
-                                className="group flex flex-col p-8 bg-white border border-black/10 rounded-2xl cursor-pointer hover:-translate-y-2 hover:shadow-2xl hover:border-black/30 transition-all duration-300 ease-out relative overflow-hidden"
+                                className="group flex flex-col p-10 bg-white/90 backdrop-blur-sm border border-black/5 rounded-[3rem] cursor-pointer hover:-translate-y-2 hover:shadow-[0_30px_60px_-12px_rgba(0,0,0,0.1)] transition-all duration-500 ease-out relative overflow-hidden"
                             >
                                 {/* Decorative Gradient */}
-                                <div className={`absolute -top-10 -right-10 w-40 h-40 rounded-full opacity-0 group-hover:opacity-40 blur-3xl transition-opacity duration-300 ${d.color}`} />
+                                <div className={`absolute -top-10 -right-10 w-40 h-40 rounded-full opacity-0 group-hover:opacity-10 blur-3xl transition-opacity duration-300 ${d.color}`} />
 
-                                <div className="flex justify-between items-start mb-8 z-10">
+                                <div className="flex justify-between items-start mb-10 z-10">
                                     <div className="text-4xl text-[#0D0D0D] font-light">{d.icon}</div>
-                                    <span className={`px-3 py-1 text-[10px] font-bold uppercase tracking-wider rounded-full border border-black/10 ${d.color} shadow-sm`}>
+                                    <span className={`px-4 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-full border border-black/5 shadow-sm ${d.color}`}>
                                         {d.module}
                                     </span>
                                 </div>
 
-                                <h3 className="font-serif text-2xl font-bold text-[#0D0D0D] mb-3 z-10">
+                                <h3 className="font-serif text-2xl font-black text-[#0D0D0D] mb-4 z-10">
                                     {d.domain}
                                 </h3>
-                                <p className="text-gray-600 leading-relaxed font-medium z-10 text-sm">
+                                <p className="text-gray-500 leading-relaxed font-medium z-10 text-sm">
                                     {d.desc}
                                 </p>
                             </div>

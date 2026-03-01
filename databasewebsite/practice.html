@@ -52,15 +52,15 @@
             display: flex;
             align-items: flex-start;
             gap: 16px;
-            padding: 18px 20px;
+            padding: 18px 24px;
             border: 2px solid transparent;
-            border-radius: 20px;
+            border-radius: 9999px;
             cursor: pointer;
             transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
             text-align: left;
-            background: rgba(255, 255, 255, 0.6);
-            backdrop-filter: blur(8px);
-            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(4px);
+            box-shadow: 0 4px 10px -2px rgb(0 0 0 / 0.05);
         }
         .option-btn.selected {
             border-color: #1a1a2e;
@@ -72,8 +72,8 @@
             flex-shrink: 0;
             width: 32px;
             height: 32px;
-            border-radius: 10px;
-            border: 2px solid rgba(26, 26, 46, 0.2);
+            border-radius: 9999px;
+            border: 2px solid rgba(26, 26, 46, 0.15);
             display: flex;
             align-items: center;
             justify-content: center;
@@ -129,22 +129,22 @@
     <!-- ── HEADER ── -->
     <header class="h-[52px] bg-[#1E2532] flex items-center justify-between px-6 text-white shrink-0 z-10">
         <div class="flex items-center gap-4">
-            <span class="text-xs font-semibold px-2 py-1 hover:bg-white/10 rounded cursor-pointer">Directions ▼</span>
-            <span id="stage-label" class="text-sm border-l border-white/20 pl-4 py-1 text-gray-300 font-medium">Reading & Writing</span>
+            <span class="text-[10px] font-black uppercase tracking-wider px-3 py-1.5 hover:bg-white/10 rounded-full cursor-pointer transition-colors border border-white/10">Directions ▼</span>
+            <span id="stage-label" class="text-[10px] font-black uppercase tracking-widest border-l border-white/20 pl-4 py-1 text-gray-400">Reading & Writing</span>
         </div>
         
         <div class="absolute left-1/2 -translate-x-1/2 flex flex-col items-center">
-            <button id="toggle-timer" class="flex flex-col items-center px-4 py-1 hover:bg-white/10 rounded transition-colors">
-                <span id="timer-display" class="text-lg font-mono font-bold tracking-wider">32:00</span>
-                <span id="timer-hide-text" class="text-[10px] uppercase tracking-tighter text-gray-400">Hide</span>
+            <button id="toggle-timer" class="flex flex-col items-center px-6 py-1 hover:bg-white/10 rounded-full transition-colors border border-transparent hover:border-white/5">
+                <span id="timer-display" class="text-lg font-mono font-black tracking-wider">32:00</span>
+                <span id="timer-hide-text" class="text-[9px] font-black uppercase tracking-widest text-gray-500">Hide</span>
             </button>
         </div>
 
         <div class="flex items-center gap-4">
-            <button id="desmos-toggle" class="bg-white/10 hover:bg-white/20 p-2 rounded-md transition-all">
+            <button id="desmos-toggle" class="bg-white/5 hover:bg-white/15 p-2 rounded-full border border-white/10 transition-all active:scale-90">
                 <i data-lucide="calculator" class="w-5 h-5"></i>
             </button>
-            <button id="finish-test" class="bg-white text-black px-4 py-1 rounded-md text-sm font-bold hover:bg-gray-200">
+            <button id="finish-test" class="bg-white text-black px-5 py-1.5 rounded-full text-xs font-black uppercase tracking-widest hover:bg-gray-200 transition-all active:scale-95 shadow-lg">
                 Finish Test
             </button>
         </div>
@@ -157,16 +157,16 @@
         <div class="flex-grow flex gap-8 max-w-[1400px] mx-auto w-full overflow-hidden">
             
             <!-- Left Side: Prompt (For RW) - glassmorphic -->
-            <div id="prompt-panel" class="w-1/2 bg-white/70 backdrop-blur-md rounded-[32px] border border-white/20 shadow-xl p-10 overflow-y-auto no-scrollbar hidden">
-                <div id="prompt-text" class="text-[18px] leading-[1.7] text-[#1e293b] font-medium serif-text"></div>
+            <div id="prompt-panel" class="w-1/2 bg-white/85 backdrop-blur-sm rounded-[3rem] border border-black/5 shadow-2xl p-12 overflow-y-auto no-scrollbar hidden">
+                <div id="prompt-text" class="text-[19px] leading-[1.8] text-[#1e293b] font-medium serif-text"></div>
             </div>
 
             <!-- Right Side: Question & Options - glassmorphic -->
-            <div id="question-panel" class="flex-grow bg-white/60 backdrop-blur-md rounded-[32px] border border-white/20 shadow-xl flex flex-col overflow-hidden">
-                <div class="flex items-center justify-between p-6 border-b border-black/5 bg-white/40">
-                    <div class="flex items-center gap-4">
-                        <span id="q-number" class="bg-[#1a1a2e] text-white w-10 h-10 flex items-center justify-center rounded-2xl font-black text-lg shadow-lg">1</span>
-                        <button id="mark-btn" class="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 hover:text-black transition-colors">
+            <div id="question-panel" class="flex-grow bg-white/80 backdrop-blur-sm rounded-[3rem] border border-black/5 shadow-2xl flex flex-col overflow-hidden">
+                <div class="flex items-center justify-between p-8 border-b border-black/5 bg-white/50">
+                    <div class="flex items-center gap-5">
+                        <span id="q-number" class="bg-[#1a1a2e] text-white w-12 h-12 flex items-center justify-center rounded-2xl font-black text-xl shadow-xl">1</span>
+                        <button id="mark-btn" class="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.25em] text-gray-400 hover:text-black transition-all active:scale-95">
                             <i data-lucide="bookmark" class="w-4 h-4"></i> Mark for Review
                         </button>
                     </div>
@@ -188,18 +188,18 @@
         </div>
 
         <!-- BOTTOM NAV -->
-        <footer class="h-[64px] bg-white border-t flex items-center justify-between px-8 shrink-0">
-            <div class="flex items-center gap-4">
-                <span id="user-initials" class="w-10 h-10 bg-blue-100 text-blue-800 flex items-center justify-center rounded-md font-bold text-sm">DS</span>
-                <div class="text-xs">
-                    <p class="font-bold text-gray-900">Dhruv Shah</p>
-                    <button class="text-blue-600 hover:underline">Question Navigator ▲</button>
+        <footer class="h-[80px] bg-white/90 backdrop-blur-sm border-t border-black/5 flex items-center justify-between px-10 shrink-0">
+            <div class="flex items-center gap-5">
+                <span id="user-initials" class="w-12 h-12 bg-[#1a1a2e] text-white flex items-center justify-center rounded-full font-black text-sm shadow-md">DS</span>
+                <div class="text-[10px] font-black uppercase tracking-widest">
+                    <p class="text-[#1a1a2e]">Dhruv Shah</p>
+                    <button class="text-gray-400 hover:text-black transition-colors">Navigator ▲</button>
                 </div>
             </div>
 
             <div class="flex gap-4">
-                <button id="prev-btn" class="px-6 py-2 border-2 border-black/5 rounded-md font-bold hover:bg-gray-50 flex items-center gap-2">Back</button>
-                <button id="next-btn" class="px-8 py-2 bg-[#003087] text-white rounded-md font-bold hover:bg-blue-800 flex items-center gap-2">Next</button>
+                <button id="prev-btn" class="px-8 py-3 border border-black/10 rounded-full font-black text-xs uppercase tracking-widest hover:bg-black hover:text-white transition-all active:scale-95 disabled:opacity-30 disabled:pointer-events-none">Back</button>
+                <button id="next-btn" class="px-10 py-3 bg-[#1a1a2e] text-white rounded-full font-black text-xs uppercase tracking-widest hover:bg-black shadow-xl hover:-translate-y-0.5 transition-all active:scale-95">Next</button>
             </div>
         </footer>
     </main>

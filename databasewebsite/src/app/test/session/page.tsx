@@ -204,6 +204,7 @@ export default function BluebookSession() {
 
     const [usingMock, setUsingMock] = useState(false);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
+    const [finishModalOpen, setFinishModalOpen] = useState(false);
     const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
     const loadStage = useCallback(async (s: Stage, routingVal?: number, currentSeenIds?: Set<string>) => {
@@ -451,45 +452,49 @@ export default function BluebookSession() {
         <div className="flex flex-col h-screen w-screen bg-white font-sans overflow-hidden select-none">
             {/* 1. BLUEBOOK HEADER */}
             <header className="h-[52px] bg-[#1E2532] flex items-center justify-between px-6 text-white shrink-0 shadow-md z-10 relative">
-                <div className="flex items-center gap-3">
-                    <span className="font-semibold text-sm cursor-pointer hover:bg-[#2D3646] px-2 py-1 rounded transition-colors">Directions ▼</span>
-                    <span className="text-gray-300 text-sm border-l border-[#3A4556] pl-3 py-1 font-medium tracking-wide">{cfg.label}</span>
+                <div className="flex items-center gap-4">
+                    <span className="text-[10px] font-black uppercase tracking-wider px-3 py-1.5 hover:bg-white/10 rounded-full cursor-pointer transition-colors border border-white/10">Directions ▼</span>
+                    <span className="text-[10px] font-black uppercase tracking-widest border-l border-white/20 pl-4 py-1 text-gray-400">{cfg.label}</span>
                     {usingMock && (
-                        <span className="bg-[#E67E22] text-white text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-widest flex items-center gap-1 animate-pulse ml-2 shadow-sm border border-[#D35400]">
-                            <WifiOff className="w-2.5 h-2.5" /> Local Database Active
+                        <span className="bg-[#E67E22] text-white text-[9px] px-3 py-1 rounded-full font-black uppercase tracking-widest flex items-center gap-1.5 shadow-lg border border-white/10">
+                            <WifiOff className="w-3 h-3" /> Local Mode
                         </span>
                     )}
                 </div>
 
                 {/* Timer Area */}
-                <div className="absolute left-1/2 transform -translate-x-1/2 flex items-center gap-3">
-                    {!timerHidden && (
-                        <span className="font-bold text-lg tracking-widest">{formatTime(timerSec)}</span>
-                    )}
-                    <button
+                <div className="absolute left-1/2 transform -translate-x-1/2 flex flex-col items-center">
+                    <button 
                         onClick={() => setTimerHidden(!timerHidden)}
-                        className="bg-transparent border border-[#3A4556] hover:bg-[#2D3646] px-2 py-0.5 rounded text-xs font-semibold tracking-wide text-gray-300 transition-colors"
+                        className="flex flex-col items-center px-6 py-1 hover:bg-white/10 rounded-full transition-colors border border-transparent hover:border-white/5"
                     >
-                        {timerHidden ? "Show" : "Hide"}
+                        {!timerHidden && <span className="font-black text-lg font-mono tracking-widest">{formatTime(timerSec)}</span>}
+                        <span className="text-[9px] font-black uppercase tracking-widest text-gray-500">{timerHidden ? "Show Timer" : "Hide"}</span>
                     </button>
                 </div>
 
                 <div className="flex items-center gap-4">
                     {isMathStage && (
-                        <button onClick={() => setDesmosOpen(!desmosOpen)} className="bg-transparent hover:bg-[#2D3646] border border-[#3A4556] px-3 py-1.5 rounded text-sm font-semibold transition-colors flex items-center gap-2">
-                            Calculator
+                        <button onClick={() => setDesmosOpen(!desmosOpen)} className="bg-white/5 hover:bg-white/15 p-2 rounded-full border border-white/10 transition-all active:scale-90">
+                            <span className="sr-only">Calculator</span>
+                            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 8h10M7 12h10M7 16h10"/></svg>
                         </button>
                     )}
+                    <button
+                        onClick={handleModuleEnd}
+                        className="bg-white text-black px-5 py-1.5 rounded-full text-xs font-black uppercase tracking-widest hover:bg-gray-200 transition-all active:scale-95 shadow-lg"
+                    >
+                        Finish Session
+                    </button>
                     <button
                         onClick={() => setMarked((prev: Set<number>) => {
                             const n = new Set(prev);
                             n.has(currentIndex) ? n.delete(currentIndex) : n.add(currentIndex);
                             return n;
                         })}
-                        className={`px-4 py-1.5 rounded text-sm font-semibold transition-colors flex items-center gap-2 border ${marked.has(currentIndex) ? 'bg-[#c23934] hover:bg-[#a62b27] border-[#c23934] text-white' : 'bg-transparent hover:bg-[#2D3646] border-[#3A4556]'}`}
+                        className={`p-2 rounded-full transition-all active:scale-90 border ${marked.has(currentIndex) ? 'bg-[#f59e0b] border-[#f59e0b] text-white shadow-lg' : 'bg-transparent border-white/10 text-gray-400 hover:text-white'}`}
                     >
-                        <span className="text-base">{marked.has(currentIndex) ? "🚩" : "⚑"}</span>
-                        Mark for Review
+                        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 21l-7-4-7 4V5a2 2 0 012-2h10a2 2 0 012 2v16z"/></svg>
                     </button>
                 </div>
             </header>
@@ -497,34 +502,34 @@ export default function BluebookSession() {
             {/* 2. SPLIT SCREEN BODY */}
             <main className="flex-1 flex overflow-hidden border-t-2 border-[#1a1a2e] bg-[#f8fafc]">
                 {/* Left Pane: Question & Prompt Text (WAS RIGHT) */}
-                <div className="w-1/2 overflow-y-auto border-r border-[#1a1a2e]/10 bg-white/70 backdrop-blur-md">
+                <div className="w-1/2 overflow-y-auto border-r border-black/5 bg-white/85 backdrop-blur-sm">
                     <div className="p-12 max-w-2xl mx-auto h-full">
                         {!currentQ.is_placeholder && (
-                            <div className="text-[1.1rem] font-medium leading-[1.7] mb-8 text-[#1a1a1a] select-text">
+                            <div className="text-[1.15rem] font-medium leading-[1.8] mb-10 text-[#1a1a1a] select-text">
                                 {currentQ.question_text}
                             </div>
                         )}
 
                         {currentQ.raw_original_text && (
-                            <div className="text-[1.1rem] leading-[1.7] text-[#1a1a1a] font-serif select-text text-justify border border-black/5 rounded-3xl p-10 bg-white/50 backdrop-blur-sm shadow-xl ring-1 ring-black/5">
+                            <div className="text-[1.15rem] leading-[1.8] text-[#1a1a1a] font-serif select-text text-justify border border-black/5 rounded-[3rem] p-12 bg-white/50 backdrop-blur-sm shadow-2xl ring-1 ring-black/5">
                                 {currentQ.raw_original_text}
                             </div>
                         )}
                         
                         {!currentQ.raw_original_text && !currentQ.is_placeholder && !currentQ.question_text && (
-                             <div className="text-gray-400 italic">No context available for this question.</div>
+                             <div className="text-gray-400 italic font-medium">Processing question context...</div>
                         )}
                     </div>
                 </div>
 
                 {/* Right Pane: Answer Choices (WAS LEFT) */}
-                <div className="w-1/2 overflow-y-auto bg-[#f8fafc]/30 backdrop-blur-sm">
+                <div className="w-1/2 overflow-y-auto bg-[#f8fafc]/50 backdrop-blur-sm">
                     <div className="p-12 max-w-xl mx-auto h-full">
-                        <div className="flex items-center gap-4 mb-10">
-                            <span className="w-10 h-10 flex items-center justify-center bg-[#1a1a2e] text-white rounded-xl shadow-lg font-bold text-lg">
+                        <div className="flex items-center gap-5 mb-12">
+                            <span className="w-12 h-12 flex items-center justify-center bg-[#1a1a2e] text-white rounded-2xl shadow-xl font-black text-xl">
                                 {currentIndex + 1}
                             </span>
-                            <span className="text-[10px] font-black uppercase tracking-[0.25em] text-[#1a1a2e]/40">Answer Selection</span>
+                            <span className="text-[10px] font-black uppercase tracking-[0.3em] text-[#1a1a2e]/40">Answer Selection</span>
                         </div>
 
                         {currentQ.is_placeholder ? (
@@ -539,13 +544,13 @@ export default function BluebookSession() {
                                     return (
                                         <label
                                             key={idx}
-                                            className={`flex items-start p-6 rounded-2xl cursor-pointer transition-all border-2 group shadow-sm backdrop-blur-md ${selected ? 'bg-[#1a1a2e]/5 border-[#1a1a2e] ring-1 ring-[#1a1a2e]' : 'bg-white/80 border-transparent hover:border-[#1a1a2e]/20 hover:bg-white'}`}
+                                            className={`flex items-start p-6 rounded-full cursor-pointer transition-all border-2 group shadow-sm backdrop-blur-sm ${selected ? 'bg-[#1a1a2e]/5 border-[#1a1a2e] ring-1 ring-[#1a1a2e]' : 'bg-white/90 border-transparent hover:border-[#1a1a2e]/30 hover:bg-white'}`}
                                         >
                                             <input type="radio" name="answer" className="hidden" onChange={() => setAnswers(prev => ({ ...prev, [currentIndex]: letter }))} checked={selected} />
-                                            <div className={`w-9 h-9 rounded-xl border-2 flex items-center justify-center font-bold mr-5 shrink-0 transition-all ${selected ? 'bg-[#1a1a2e] text-white border-[#1a1a2e] shadow-md scale-105' : 'border-[#1a1a2e]/20 text-[#1a1a2e]/40 bg-white group-hover:bg-white'}`}>
+                                            <div className={`w-9 h-9 rounded-full border-2 flex items-center justify-center font-black mr-5 shrink-0 transition-all ${selected ? 'bg-[#1a1a2e] text-white border-[#1a1a2e] shadow-md scale-105' : 'border-[#1a1a2e]/20 text-[#1a1a2e]/40 bg-white group-hover:bg-white'}`}>
                                                 {letter}
                                             </div>
-                                            <span className={`text-[1.1rem] leading-relaxed pt-1.5 transition-colors ${selected ? 'text-[#1a1a2e] font-semibold' : 'text-gray-700'}`}>
+                                            <span className={`text-[1.1rem] leading-relaxed pt-1.5 transition-colors ${selected ? 'text-[#1a1a2e] font-black' : 'text-gray-600 font-medium'}`}>
                                                 {opt}
                                             </span>
                                         </label>
@@ -570,13 +575,17 @@ export default function BluebookSession() {
             </main>
 
             {/* 3. THE "PACK" (Bottom Navigation Grid) */}
-            <footer className="h-[72px] bg-white flex items-center justify-between px-6 shrink-0 border-t border-gray-300 z-10 w-full relative">
-                <div className="flex items-center sm:w-1/4">
-                    <span className="font-semibold text-[#1E2532] text-sm tracking-wide bg-gray-100 px-3 py-1 rounded hidden sm:inline-block">Student</span>
+            <footer className="h-[80px] bg-white/95 backdrop-blur-sm flex items-center justify-between px-10 shrink-0 border-t border-black/5 z-10 w-full relative shadow-[0_-10px_30px_-15px_rgba(0,0,0,0.05)]">
+                <div className="flex items-center sm:w-1/4 gap-5">
+                    <span className="w-12 h-12 bg-[#1a1a2e] text-white flex items-center justify-center rounded-full font-black text-sm shadow-lg">DS</span>
+                    <div className="flex flex-col">
+                        <span className="text-[10px] font-black uppercase tracking-widest text-[#1a1a2e]">Dhruv Shah</span>
+                        <button className="text-[9px] font-black uppercase tracking-wider text-gray-400 hover:text-black transition-colors text-left uppercase pr-4">Navigator ▲</button>
+                    </div>
                 </div>
 
                 {/* The Bluebook Square Nav */}
-                <div className="flex gap-1.5 overflow-x-auto px-4 w-full sm:w-1/2 justify-center pb-2 pt-2 items-center flex-nowrap scrollbar-hide">
+                <div className="flex gap-2 overflow-x-auto px-4 w-full sm:w-1/2 justify-center pb-2 pt-2 items-center flex-nowrap scrollbar-hide">
                     {questions.map((q, idx) => {
                         const isAnswered = q.options ? !!answers[idx] : !!freeText[idx];
                         const isMarked = marked.has(idx);
@@ -586,47 +595,37 @@ export default function BluebookSession() {
                             <button
                                 key={idx}
                                 onClick={() => setCurrentIndex(idx)}
-                                className={`w-[34px] h-[34px] flex items-center justify-center text-xs font-bold transition-all relative shrink-0 
-                                     ${isCurrent ? 'bg-black text-white outline outline-2 outline-offset-2 outline-black shadow-md z-10' : ''} 
-                                     ${!isCurrent && isAnswered ? 'bg-[#d8e6f3] text-[#0c59a4]' : ''}
-                                     ${!isCurrent && !isAnswered ? 'bg-white text-gray-600 border border-gray-400 border-dashed hover:bg-gray-100' : ''}
-                                     ${isMarked && !isCurrent ? 'outline outline-2 outline-offset-1 outline-[#c23934]' : ''}
+                                className={`w-9 h-9 flex items-center justify-center text-[10px] font-black transition-all relative shrink-0 rounded-lg shadow-sm
+                                     ${isCurrent ? 'bg-[#1a1a2e] text-white ring-4 ring-[#1a1a2e]/10 scale-110 z-10 font-black' : ''} 
+                                     ${!isCurrent && isAnswered ? 'bg-[#1a1a2e]/10 text-[#1a1a2e]' : ''}
+                                     ${!isCurrent && !isAnswered ? 'bg-white text-gray-400 border border-black/5 hover:bg-gray-100 hover:border-black/20' : ''}
+                                     ${isMarked && !isCurrent ? 'border-2 border-orange-400' : ''}
                                  `}
-                                style={{ borderRadius: isCurrent ? '0px' : '2px' }}
                             >
                                 {idx + 1}
                                 {isMarked && (
-                                    <span className="absolute -top-1.5 -right-1.5 text-[#c23934] text-[10px] drop-shadow-sm">🚩</span>
+                                    <span className="absolute -top-1.5 -right-1.5 text-orange-500 drop-shadow-sm scale-125">🚩</span>
                                 )}
                             </button>
                         );
                     })}
                 </div>
 
-                <div className="flex gap-3 sm:w-1/4 justify-end">
+                <div className="flex gap-4 sm:w-1/4 justify-end">
                     <button
                         onClick={() => setCurrentIndex(prev => Math.max(0, prev - 1))}
-                        className="px-6 py-1.5 bg-transparent border-2 border-transparent text-[#0c59a4] font-bold rounded-md hover:bg-[#ebf3fa] disabled:opacity-30 disabled:hover:bg-transparent transition-colors text-sm hidden sm:inline-block"
+                        className="px-8 py-3 bg-transparent border border-black/10 text-gray-400 font-black rounded-full hover:bg-black hover:text-white disabled:opacity-30 disabled:pointer-events-none transition-all text-[10px] uppercase tracking-[0.2em] hidden sm:inline-block active:scale-95"
                         disabled={currentIndex === 0}
                     >
                         Back
                     </button>
 
-                    {currentIndex === questions.length - 1 ? (
-                        <button
-                            onClick={handleModuleEnd}
-                            className="px-8 py-1.5 bg-[#0c59a4] text-white font-bold rounded-md hover:bg-[#094784] shadow-md transition-colors text-sm"
-                        >
-                            Next
-                        </button>
-                    ) : (
-                        <button
-                            onClick={() => setCurrentIndex(prev => Math.min(questions.length - 1, prev + 1))}
-                            className="px-8 py-1.5 bg-[#0c59a4] text-white font-bold rounded-md hover:bg-[#094784] shadow-md transition-colors text-sm flex items-center gap-1 shrink-0"
-                        >
-                            Next
-                        </button>
-                    )}
+                    <button
+                        onClick={() => currentIndex === questions.length - 1 ? handleModuleEnd() : setCurrentIndex(prev => prev + 1)}
+                        className="px-10 py-3 bg-[#1a1a2e] text-white font-black rounded-full hover:bg-black shadow-[0_10px_20px_-5px_rgba(26,26,46,0.3)] transition-all text-[10px] uppercase tracking-[0.25em] flex items-center gap-1 active:scale-95 hover:-translate-y-0.5"
+                    >
+                        {currentIndex === questions.length - 1 ? 'Finish' : 'Next'}
+                    </button>
                 </div>
             </footer>
 
