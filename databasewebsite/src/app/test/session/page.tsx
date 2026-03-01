@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
 import { calculateModuleWeightedScore, calculateSectionScaledScore } from "@/lib/scoring-logic";
 import { createClient } from "@supabase/supabase-js";
-import { Loader2, AlertCircle, Database, WifiOff } from "lucide-react";
+import { Loader2, AlertCircle, WifiOff } from "lucide-react";
 import { getMockQuestions } from "@/lib/mock-data";
 
 const DesmosCalculator = dynamic(() => import("../DesmosCalculator"), { ssr: false });
@@ -32,6 +32,74 @@ const STAGE_CONFIG = {
     3: { label: "Math — Module 1", count: 22, seconds: 35 * 60, subject: "math" },
     4: { label: "Math — Module 2", count: 22, seconds: 35 * 60, subject: "math" },
 } as const;
+
+interface ModuleReview {
+    stage: Stage;
+    label: string;
+    questions: Question[];
+    answers: Record<number, string>;
+    freeText: Record<number, string>;
+}
+
+const CHOICE_LETTERS = ["A", "B", "C", "D"] as const;
+
+function isUserResponseCorrect(q: Question, rawUserAnswer: string): boolean {
+    const ansLetter = rawUserAnswer.trim().toLowerCase();
+    const dbAns = (q.correct_answer || "").trim().toLowerCase();
+
+    if (!ansLetter || !dbAns) return false;
+
+    if (q.options && q.options.length > 0) {
+        const userIdx = ['a', 'b', 'c', 'd'].indexOf(ansLetter);
+        const optText = userIdx >= 0 ? (q.options[userIdx] || "").trim().toLowerCase() : "";
+
+        return (
+            ansLetter === dbAns ||
+            dbAns === `choice ${ansLetter}` ||
+            dbAns === `option ${ansLetter}` ||
+            (optText !== "" && optText === dbAns)
+        );
+    }
+
+    return ansLetter === dbAns;
+}
+
+function getUserAnswerLabel(q: Question, answerLetter?: string, freeTextAnswer?: string): string {
+    if (q.options && q.options.length > 0) {
+        const letter = (answerLetter || "").toUpperCase();
+        if (!letter) return "No response";
+        const idx = CHOICE_LETTERS.indexOf(letter as typeof CHOICE_LETTERS[number]);
+        if (idx >= 0 && q.options[idx]) {
+            return `${letter}. ${q.options[idx]}`;
+        }
+        return letter;
+    }
+
+    const value = (freeTextAnswer || "").trim();
+    return value || "No response";
+}
+
+function getCorrectAnswerLabel(q: Question): string {
+    const raw = (q.correct_answer || "").trim();
+    const rawLower = raw.toLowerCase();
+
+    if (q.options && q.options.length > 0) {
+        const letterMatch = rawLower.match(/^(?:choice |option )?([a-d])$/);
+        if (letterMatch) {
+            const idx = ['a', 'b', 'c', 'd'].indexOf(letterMatch[1]);
+            if (idx >= 0 && q.options[idx]) {
+                return `${CHOICE_LETTERS[idx]}. ${q.options[idx]}`;
+            }
+        }
+
+        const textIdx = q.options.findIndex(opt => opt.trim().toLowerCase() === rawLower);
+        if (textIdx >= 0) {
+            return `${CHOICE_LETTERS[textIdx]}. ${q.options[textIdx]}`;
+        }
+    }
+
+    return raw || "Not available";
+}
 
 function makePlaceholder(section: string, difficulty: string, domain: string, index: number): Question {
     return {
@@ -131,6 +199,7 @@ export default function BluebookSession() {
     const [moduleWeightedScores, setModuleWeightedScores] = useState<Record<number, number>>({});
     const [finalRWScore, setFinalRWScore] = useState(0);
     const [finalMathScore, setFinalMathScore] = useState(0);
+    const [moduleReviews, setModuleReviews] = useState<ModuleReview[]>([]);
 
     const [usingMock, setUsingMock] = useState(false);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -180,35 +249,29 @@ export default function BluebookSession() {
         let correctRaw = 0;
         for (let i = 0; i < cfg.count; i++) {
             const q = questions[i];
-            const ansLetter = (q.options ? answers[i] : freeText[i] || "").trim().toLowerCase();
-            const dbAns = (q.correct_answer || "").trim().toLowerCase();
-
-            if (!ansLetter || !dbAns) continue;
-
-            let isCorrect = false;
-
-            if (q.options && q.options.length > 0) {
-                const userIdx = ['a', 'b', 'c', 'd'].indexOf(ansLetter);
-                const optText = userIdx >= 0 ? (q.options[userIdx] || "").trim().toLowerCase() : "";
-
-                if (
-                    ansLetter === dbAns ||
-                    dbAns === `choice ${ansLetter}` ||
-                    dbAns === `option ${ansLetter}` ||
-                    (optText && optText === dbAns)
-                ) {
-                    isCorrect = true;
-                }
-            } else {
-                if (ansLetter === dbAns) isCorrect = true;
-            }
-
-            if (isCorrect) correctRaw++;
+            if (!q) continue;
+            const userAnswer = q.options ? (answers[i] || "") : (freeText[i] || "");
+            if (isUserResponseCorrect(q, userAnswer)) correctRaw++;
         }
 
         const weighted = calculateModuleWeightedScore(questions, answers, freeText, cfg.count);
         setModuleCorrectCounts(prev => ({ ...prev, [stage]: correctRaw }));
         setModuleWeightedScores(prev => ({ ...prev, [stage]: weighted }));
+        setModuleReviews(prev => {
+            const snapshot: ModuleReview = {
+                stage,
+                label: cfg.label,
+                questions: questions.map(q => ({
+                    ...q,
+                    options: q.options ? [...q.options] : q.options
+                })),
+                answers: { ...answers },
+                freeText: { ...freeText },
+            };
+
+            const withoutCurrent = prev.filter(mod => mod.stage !== stage);
+            return [...withoutCurrent, snapshot].sort((a, b) => a.stage - b.stage);
+        });
 
         if (stage === 1 || stage === 3) {
             setPhase("between");
@@ -305,7 +368,7 @@ export default function BluebookSession() {
 
     if (phase === "complete") {
         return (
-            <div className="min-h-screen flex flex-col items-center justify-center bg-white text-black font-sans text-center p-8">
+            <div className="min-h-screen flex flex-col items-center justify-start bg-white text-black font-sans text-center p-8">
                 <p className="text-xs tracking-widest uppercase text-gray-500 mb-3">Practice Performance</p>
                 <h2 className="text-8xl font-black mb-0 leading-none tracking-tighter">{finalRWScore + finalMathScore}</h2>
                 <p className="text-sm text-gray-500 mb-8 uppercase tracking-widest">Total Scaled Score (400–1600)</p>
@@ -324,6 +387,53 @@ export default function BluebookSession() {
                 <a href="/" className="bg-[#E6D5F8] text-black border border-black rounded-full px-10 py-3 text-base font-bold cursor-pointer no-underline hover:bg-[#D4BFEF] transition-colors">
                     Return to Home
                 </a>
+
+                <section className="w-full max-w-5xl mt-12 text-left border-t border-gray-200 pt-10">
+                    <p className="text-xs tracking-widest uppercase text-gray-500 mb-2">Reflection / Review</p>
+                    <h3 className="text-3xl font-bold mb-8">Correct Answers</h3>
+
+                    {moduleReviews.length === 0 ? (
+                        <p className="text-gray-600">No module responses were captured for review.</p>
+                    ) : (
+                        <div className="space-y-8">
+                            {moduleReviews.map((module) => (
+                                <article key={module.stage} className="border border-gray-200 rounded-xl p-6 bg-white shadow-sm">
+                                    <h4 className="text-xl font-bold mb-1">{module.label}</h4>
+                                    <p className="text-xs text-gray-500 uppercase tracking-widest mb-6">
+                                        Answers were hidden during testing. Correct answers are shown here only after all 4 modules.
+                                    </p>
+
+                                    <div className="space-y-4">
+                                        {module.questions.map((q, idx) => {
+                                            const userRaw = q.options ? (module.answers[idx] || "") : (module.freeText[idx] || "");
+                                            const isCorrect = isUserResponseCorrect(q, userRaw);
+                                            const userLabel = getUserAnswerLabel(q, module.answers[idx], module.freeText[idx]);
+                                            const correctLabel = getCorrectAnswerLabel(q);
+
+                                            return (
+                                                <div key={`${module.stage}-${q.id}-${idx}`} className="rounded-lg border border-gray-200 p-4 bg-gray-50">
+                                                    <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Question {idx + 1}</p>
+                                                    <p className="text-base font-semibold text-[#1a1a1a] mb-3">
+                                                        {q.question_text || "Question text unavailable."}
+                                                    </p>
+                                                    <p className="text-sm text-gray-700 mb-1">
+                                                        <span className="font-semibold">Your answer:</span> {userLabel}
+                                                    </p>
+                                                    <p className="text-sm text-gray-700">
+                                                        <span className="font-semibold">Correct answer:</span> {correctLabel}
+                                                    </p>
+                                                    <p className={`text-xs font-bold uppercase tracking-wider mt-3 ${isCorrect ? "text-green-700" : "text-red-700"}`}>
+                                                        {isCorrect ? "Correct" : "Incorrect"}
+                                                    </p>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </article>
+                            ))}
+                        </div>
+                    )}
+                </section>
             </div>
         );
     }
@@ -385,38 +495,24 @@ export default function BluebookSession() {
 
             {/* 2. SPLIT SCREEN BODY */}
             <main className="flex-1 flex overflow-hidden border-t-2 border-black">
-                {/* Left Pane: Passage */}
+                {/* Left Pane: Answer Choices */}
                 <div className="w-1/2 overflow-y-auto border-r-2 border-gray-300 bg-white">
-                    <div className="p-10 max-w-2xl mx-auto h-full">
-                        <div className="text-[1.1rem] leading-relaxed text-[#1a1a1a] font-serif select-text text-justify">
-                            {currentQ.rationale || currentQ.raw_original_text || "Read the following text and answer the question."}
-                        </div>
-                    </div>
-                </div>
-
-                {/* Right Pane: Question & Options */}
-                <div className="w-1/2 overflow-y-auto bg-white relative">
                     <div className="p-10 max-w-2xl mx-auto h-full">
                         <div className="flex items-baseline gap-3 mb-6">
                             <span className="text-sm font-bold bg-black text-white px-3 py-1 pb-1.5 rounded inline-block shadow-sm">
                                 {currentIndex + 1}
                             </span>
+                            <span className="text-xs font-bold uppercase tracking-widest text-gray-500">Answer Choices</span>
                         </div>
-
-                        {!currentQ.is_placeholder && (
-                            <div className="text-[1.05rem] font-medium leading-relaxed mb-8 text-[#1a1a1a] select-text">
-                                {currentQ.question_text}
-                            </div>
-                        )}
 
                         {currentQ.is_placeholder ? (
                             <div className="border border-red-300 rounded p-6 bg-red-50 text-red-700 font-bold max-w-sm">
-                                ⚠ Error: Missing Array Data
+                                Warning: Missing Array Data
                             </div>
                         ) : currentQ.options && currentQ.options.length > 0 ? (
                             <fieldset className="space-y-3">
                                 {currentQ.options.map((opt: string, idx: number) => {
-                                    const letter = ['A', 'B', 'C', 'D'][idx];
+                                    const letter = CHOICE_LETTERS[idx];
                                     const selected = answers[currentIndex] === letter;
                                     return (
                                         <label
@@ -447,6 +543,21 @@ export default function BluebookSession() {
                                 />
                             </div>
                         )}
+                    </div>
+                </div>
+
+                {/* Right Pane: Question Text */}
+                <div className="w-1/2 overflow-y-auto bg-white relative">
+                    <div className="p-10 max-w-2xl mx-auto h-full">
+                        {!currentQ.is_placeholder && (
+                            <div className="text-[1.05rem] font-medium leading-relaxed mb-8 text-[#1a1a1a] select-text">
+                                {currentQ.question_text}
+                            </div>
+                        )}
+
+                        <div className="text-[1.05rem] leading-relaxed text-[#1a1a1a] font-serif select-text text-justify border border-gray-200 rounded-xl p-6 bg-gray-50">
+                            {currentQ.rationale || currentQ.raw_original_text || "Read the following text and answer the question."}
+                        </div>
                     </div>
                 </div>
             </main>
