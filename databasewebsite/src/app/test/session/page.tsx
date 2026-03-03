@@ -166,8 +166,32 @@ async function fetchQuestions(stage: Stage, module1Score?: number, seenIds?: Set
 
     const typedData = data as Question[];
     const freshRows = seenIds ? typedData.filter(r => !seenIds.has(r.id)) : typedData;
-    const shuffledRows = shuffleArray(freshRows);
-    const results = shuffledRows.slice(0, total);
+
+    const uniqueQuestions: Question[] = [];
+    const seenText = new Set<string>();
+
+    for (const q of freshRows) {
+        if (!seenText.has(q.question_text)) {
+            seenText.add(q.question_text);
+
+            // Clean malformed options: Strip leading "A)", "B.", "C -", etc.
+            if (Array.isArray(q.options)) {
+                q.options = q.options.map((opt: string) =>
+                    opt.replace(/^[a-dA-D][\)\.\-]\s*/, '').trim()
+                );
+            }
+            uniqueQuestions.push(q);
+        }
+    }
+
+    const sortedQuestions = uniqueQuestions.sort((a, b) => {
+        const diffScore: Record<string, number> = { 'Easy': 1, 'Medium': 2, 'Hard': 3 };
+        const scoreA = diffScore[a.difficulty || 'Medium'] || 2;
+        const scoreB = diffScore[b.difficulty || 'Medium'] || 2;
+        return scoreA - scoreB;
+    });
+
+    const results = sortedQuestions.slice(0, total);
 
     let placeholderIdx = 0;
     while (results.length < total) {
@@ -464,7 +488,7 @@ export default function BluebookSession() {
 
                 {/* Timer Area */}
                 <div className="absolute left-1/2 transform -translate-x-1/2 flex flex-col items-center">
-                    <button 
+                    <button
                         onClick={() => setTimerHidden(!timerHidden)}
                         className="flex flex-col items-center px-6 py-1 hover:bg-white/10 rounded-full transition-colors border border-transparent hover:border-white/5"
                     >
@@ -477,7 +501,7 @@ export default function BluebookSession() {
                     {isMathStage && (
                         <button onClick={() => setDesmosOpen(!desmosOpen)} className="bg-white/5 hover:bg-white/15 p-2 rounded-full border border-white/10 transition-all active:scale-90">
                             <span className="sr-only">Calculator</span>
-                            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 8h10M7 12h10M7 16h10"/></svg>
+                            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect width="18" height="18" x="3" y="3" rx="2" /><path d="M7 8h10M7 12h10M7 16h10" /></svg>
                         </button>
                     )}
                     <button
@@ -494,7 +518,7 @@ export default function BluebookSession() {
                         })}
                         className={`p-2 rounded-full transition-all active:scale-90 border ${marked.has(currentIndex) ? 'bg-[#f59e0b] border-[#f59e0b] text-white shadow-lg' : 'bg-transparent border-white/10 text-gray-400 hover:text-white'}`}
                     >
-                        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 21l-7-4-7 4V5a2 2 0 012-2h10a2 2 0 012 2v16z"/></svg>
+                        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 21l-7-4-7 4V5a2 2 0 012-2h10a2 2 0 012 2v16z" /></svg>
                     </button>
                 </div>
             </header>
@@ -515,9 +539,9 @@ export default function BluebookSession() {
                                 {currentQ.raw_original_text}
                             </div>
                         )}
-                        
+
                         {!currentQ.raw_original_text && !currentQ.is_placeholder && !currentQ.question_text && (
-                             <div className="text-gray-400 italic font-medium">Processing question context...</div>
+                            <div className="text-gray-400 italic font-medium">Processing question context...</div>
                         )}
                     </div>
                 </div>
