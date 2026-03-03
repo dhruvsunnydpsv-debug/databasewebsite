@@ -51,7 +51,7 @@ export default function AdaptiveBluebookSession() {
             }
 
             // Deduplication and Text Cleanup
-            const uniqueQuestions = [];
+            const uniqueQuestions: any[] = [];
             const seenText = new Set();
 
             for (const q of data || []) {
