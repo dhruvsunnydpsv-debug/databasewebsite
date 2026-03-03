@@ -69,6 +69,7 @@ for raw_q in RAW_QUESTIONS:
             "raw_original_text": raw_q,
             "module": 1,
             "rationale": "",
+            "source_method": "AI_HARVEST",
             "created_at": "now()"
         }
         try:
