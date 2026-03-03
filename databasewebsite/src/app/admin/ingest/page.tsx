@@ -19,15 +19,15 @@ export default function AdminIngestPage() {
     }, []);
 
     const processFile = async (file: File) => {
-        if (!file.type.startsWith("image/")) {
-            setError("Please drop a valid image file (.png, .jpg).");
+        if (!file.name.endsWith(".txt") && !file.name.endsWith(".json")) {
+            setError("Please drop a valid text file (.txt, .json).");
             return;
         }
         setError(null); setSuccessData(null); setIsSpinning(true);
         try {
             const formData = new FormData();
             formData.append("file", file);
-            const res = await fetch("/api/spin", { method: "POST", body: formData });
+            const res = await fetch("/api/ingest", { method: "POST", body: formData });
             const json = await res.json();
             if (!res.ok) throw new Error(json.error || "Failed to process image");
             setSuccessData(json.data);
@@ -95,7 +95,7 @@ export default function AdminIngestPage() {
                     Question Dropzone
                 </h1>
                 <p style={{ fontFamily: "'Inter', sans-serif", fontSize: '0.875rem', lineHeight: 1.7, color: '#555550', maxWidth: '520px' }}>
-                    Drop a source screenshot below. The pipeline will generate a canonical variant and persist it to the question bank.
+                    Drop a <b>.txt</b> or <b>.json</b> file below containing raw SAT questions. The pipeline will split the text, generate canonical variants via Groq Entity Swap, and persist them to the question bank.
                 </p>
             </div>
 
@@ -121,7 +121,7 @@ export default function AdminIngestPage() {
                 </p>
                 {!isSpinning && (
                     <>
-                        <p style={{ fontFamily: "'Inter', sans-serif", fontSize: '0.75rem', color: '#888880', marginBottom: '1.5rem' }}>PNG, JPG, WEBP — up to 5 MB</p>
+                        <p style={{ fontFamily: "'Inter', sans-serif", fontSize: '0.75rem', color: '#888880', marginBottom: '1.5rem' }}>Text Files (.txt, .json) — Multiple questions allowed</p>
                         <div>
                             <label htmlFor="file-upload" style={{
                                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
@@ -131,7 +131,7 @@ export default function AdminIngestPage() {
                             }}>
                                 Browse Files
                             </label>
-                            <input id="file-upload" type="file" accept="image/*" onChange={handleFileChange} style={{ display: 'none' }} />
+                            <input id="file-upload" type="file" accept=".txt,.json" onChange={handleFileChange} style={{ display: 'none' }} />
                         </div>
                     </>
                 )}
@@ -153,28 +153,34 @@ export default function AdminIngestPage() {
                 <div style={{ padding: '1.5rem', border: '1px solid #0D0D0D', borderRadius: '12px', backgroundColor: '#F5FFF7' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
                         <CheckCircle2 style={{ width: '1.1rem', height: '1.1rem', color: '#2ECC71' }} />
-                        <p style={{ fontFamily: "'Inter', sans-serif", fontSize: '0.8rem', fontWeight: 600, color: '#0D0D0D' }}>Inserted into question bank</p>
-                    </div>
-                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.875rem' }}>
-                        {[successData.module, successData.difficulty, successData.domain].filter(Boolean).map((tag: string) => (
-                            <span key={tag} style={{ backgroundColor: '#E6D5F8', border: '1px solid #0D0D0D', borderRadius: '9999px', padding: '0.1rem 0.6rem', fontSize: '0.6rem', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', fontFamily: "'Inter', sans-serif" }}>{tag}</span>
-                        ))}
-                    </div>
-                    <p style={{ fontFamily: "'Playfair Display', serif", fontSize: '1rem', fontWeight: 500, lineHeight: 1.65, color: '#0D0D0D', marginBottom: '1rem' }}>{successData.question_text}</p>
-                    {successData.options && (
-                        <ul style={{ listStyle: 'none', padding: 0, display: 'flex', flexDirection: 'column', gap: '0.4rem', marginBottom: '1rem' }}>
-                            {successData.options.map((opt: string, i: number) => (
-                                <li key={i} style={{ padding: '0.55rem 0.875rem', border: '1px solid #D0D0C8', borderRadius: '7px', backgroundColor: '#FDFDF5', fontFamily: "'Inter', sans-serif", fontSize: '0.85rem', color: '#0D0D0D' }}>
-                                    <strong style={{ marginRight: '0.5rem' }}>{String.fromCharCode(65 + i)}.</strong>{opt}
-                                </li>
-                            ))}
-                        </ul>
-                    )}
-                    {successData.correct_answer && (
-                        <p style={{ fontFamily: "'Inter', sans-serif", fontSize: '0.8rem', color: '#0D0D0D', borderTop: '1px solid #D0D0C8', paddingTop: '0.875rem' }}>
-                            <strong>Answer:</strong> {successData.correct_answer}
+                        <p style={{ fontFamily: "'Inter', sans-serif", fontSize: '0.8rem', fontWeight: 600, color: '#0D0D0D' }}>
+                            Successfully ingested {successData.length} question(s) into the database
                         </p>
-                    )}
+                    </div>
+                    {successData.map((dataItem: any, idx: number) => (
+                        <div key={idx} style={{ marginBottom: "2rem", borderBottom: idx < successData.length - 1 ? "1px solid #ddd" : "none", paddingBottom: "1rem" }}>
+                            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.875rem' }}>
+                                {[dataItem.module && `Module ${dataItem.module}`, dataItem.difficulty, dataItem.domain].filter(Boolean).map((tag: string) => (
+                                    <span key={tag} style={{ backgroundColor: '#E6D5F8', border: '1px solid #0D0D0D', borderRadius: '9999px', padding: '0.1rem 0.6rem', fontSize: '0.6rem', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', fontFamily: "'Inter', sans-serif" }}>{tag}</span>
+                                ))}
+                            </div>
+                            <p style={{ fontFamily: "'Playfair Display', serif", fontSize: '1rem', fontWeight: 500, lineHeight: 1.65, color: '#0D0D0D', marginBottom: '1rem' }}>{dataItem.question_text}</p>
+                            {dataItem.options && (
+                                <ul style={{ listStyle: 'none', padding: 0, display: 'flex', flexDirection: 'column', gap: '0.4rem', marginBottom: '1rem' }}>
+                                    {dataItem.options.map((opt: string, i: number) => (
+                                        <li key={i} style={{ padding: '0.55rem 0.875rem', border: '1px solid #D0D0C8', borderRadius: '7px', backgroundColor: '#FDFDF5', fontFamily: "'Inter', sans-serif", fontSize: '0.85rem', color: '#0D0D0D' }}>
+                                            <strong style={{ marginRight: '0.5rem' }}>{String.fromCharCode(65 + i)}.</strong>{opt}
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
+                            {dataItem.correct_answer && (
+                                <p style={{ fontFamily: "'Inter', sans-serif", fontSize: '0.8rem', color: '#0D0D0D', borderTop: '1px solid #D0D0C8', paddingTop: '0.875rem' }}>
+                                    <strong>Answer:</strong> {dataItem.correct_answer}
+                                </p>
+                            )}
+                        </div>
+                    ))}
                 </div>
             )}
             <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
