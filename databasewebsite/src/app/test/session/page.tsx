@@ -1,662 +1,186 @@
-"use client";
+'use client';
+import { useState, useEffect } from 'react';
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 
-import { useState, useEffect, useCallback, useRef } from "react";
-import dynamic from "next/dynamic";
-import { calculateModuleWeightedScore, calculateSectionScaledScore } from "@/lib/scoring-logic";
-import { createClient } from "@supabase/supabase-js";
-import { Loader2, AlertCircle, WifiOff } from "lucide-react";
-import { getMockQuestions } from "@/lib/mock-data";
-
-const DesmosCalculator = dynamic(() => import("../DesmosCalculator"), { ssr: false });
-
-// ─── Types ────────────────────────────────────────────────────
-interface Question {
-    id: string;
-    question_text: string;
-    options: string[] | null;
-    correct_answer: string;
-    raw_original_text?: string;
-    rationale?: string;
-    domain?: string;
-    difficulty?: string;
-    section?: string;
-    is_placeholder?: boolean;
-}
-
-type Stage = 1 | 2 | 3 | 4;
-type Phase = "loading" | "testing" | "between" | "complete";
-
-const STAGE_CONFIG = {
-    1: { label: "Reading & Writing — Module 1", count: 27, seconds: 32 * 60, subject: "rw" },
-    2: { label: "Reading & Writing — Module 2", count: 27, seconds: 32 * 60, subject: "rw" },
-    3: { label: "Math — Module 1", count: 22, seconds: 35 * 60, subject: "math" },
-    4: { label: "Math — Module 2", count: 22, seconds: 35 * 60, subject: "math" },
-} as const;
-
-interface ModuleReview {
-    stage: Stage;
-    label: string;
-    questions: Question[];
-    answers: Record<number, string>;
-    freeText: Record<number, string>;
-}
-
-const CHOICE_LETTERS = ["A", "B", "C", "D"] as const;
-
-// ─── Utilities ────────────────────────────────────────────────
-function isUserResponseCorrect(q: Question, rawUserAnswer: string): boolean {
-    const ansLetter = rawUserAnswer.trim().toLowerCase();
-    const dbAns = (q.correct_answer || "").trim().toLowerCase();
-
-    if (!ansLetter || !dbAns) return false;
-
-    if (q.options && q.options.length > 0) {
-        const userIdx = ['a', 'b', 'c', 'd'].indexOf(ansLetter);
-        const optText = userIdx >= 0 ? (q.options[userIdx] || "").trim().toLowerCase() : "";
-
-        return (
-            ansLetter === dbAns ||
-            dbAns === `choice ${ansLetter}` ||
-            dbAns === `option ${ansLetter}` ||
-            (optText !== "" && optText === dbAns)
-        );
-    }
-
-    return ansLetter === dbAns;
-}
-
-function getUserAnswerLabel(q: Question, answerLetter?: string, freeTextAnswer?: string): string {
-    if (q.options && q.options.length > 0) {
-        const letter = (answerLetter || "").toUpperCase();
-        if (!letter) return "No response";
-        const idx = CHOICE_LETTERS.indexOf(letter as typeof CHOICE_LETTERS[number]);
-        if (idx >= 0 && q.options[idx]) {
-            return `${letter}. ${q.options[idx]}`;
-        }
-        return letter;
-    }
-
-    const value = (freeTextAnswer || "").trim();
-    return value || "No response";
-}
-
-function getCorrectAnswerLabel(q: Question): string {
-    const raw = (q.correct_answer || "").trim();
-    const rawLower = raw.toLowerCase();
-
-    if (q.options && q.options.length > 0) {
-        const letterMatch = rawLower.match(/^(?:choice |option )?([a-d])$/);
-        if (letterMatch) {
-            const idx = ['a', 'b', 'c', 'd'].indexOf(letterMatch[1]);
-            if (idx >= 0 && q.options[idx]) {
-                return `${CHOICE_LETTERS[idx]}. ${q.options[idx]}`;
-            }
-        }
-
-        const textIdx = q.options.findIndex(opt => opt.trim().toLowerCase() === rawLower);
-        if (textIdx >= 0) {
-            return `${CHOICE_LETTERS[textIdx]}. ${q.options[textIdx]}`;
-        }
-    }
-
-    return raw || "Not available";
-}
-
-function makePlaceholder(section: string, difficulty: string, domain: string, index: number): Question {
-    return {
-        id: `placeholder-${section}-${domain}-${difficulty}-${index}`,
-        question_text: "",
-        options: null,
-        correct_answer: "",
-        domain,
-        difficulty,
-        section,
-        is_placeholder: true,
-    };
-}
-
-function shuffleArray<T>(array: T[]): T[] {
-    const arr = [...array];
-    for (let i = arr.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [arr[i], arr[j]] = [arr[j], arr[i]];
-    }
-    return arr;
-}
-
-// ─── Direct Supabase Client Fetcher (NO 400 ERRORS) ───────────
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-
-const isConfigured = supabaseUrl && supabaseKey;
-const supabase = isConfigured ? createClient(supabaseUrl, supabaseKey) : null;
-
-async function fetchQuestions(stage: Stage, module1Score?: number, seenIds?: Set<string>): Promise<Question[]> {
-    if (!supabase) {
-        throw new Error("Supabase credentials missing. Check environment variables.");
-    }
-    const cfg = STAGE_CONFIG[stage];
-    const isMath = cfg.subject === "math";
-    const total = cfg.count;
-
-    let data, error;
-
-    if (isMath) {
-        const res = await supabase
-            .from('sat_question_bank')
-            .select('*')
-            .in('domain', ['Heart_of_Algebra', 'Advanced_Math', 'Problem_Solving_Data', 'Geometry_Trigonometry'])
-            .limit(total * 4); // fetch extra to shuffle
-        data = res.data;
-        error = res.error;
-    } else {
-        const res = await supabase
-            .from('sat_question_bank')
-            .select('*')
-            .in('domain', ['Information_Ideas', 'Craft_Structure', 'Expression_Ideas', 'Standard_English'])
-            .limit(total * 4); // fetch extra to shuffle
-        data = res.data;
-        error = res.error;
-    }
-
-    if (error || !data) {
-        console.error("Supabase Error:", error);
-        throw new Error("Failed to fetch questions from database.");
-    }
-
-    const typedData = data as Question[];
-    const freshRows = seenIds ? typedData.filter(r => !seenIds.has(r.id)) : typedData;
-
-    const uniqueQuestions: Question[] = [];
-    const seenText = new Set<string>();
-
-    for (const q of freshRows) {
-        if (!seenText.has(q.question_text)) {
-            seenText.add(q.question_text);
-
-            // Clean malformed options: Strip leading "A)", "B.", "C -", etc.
-            if (Array.isArray(q.options)) {
-                q.options = q.options.map((opt: string) =>
-                    opt.replace(/^[a-dA-D][\)\.\-]\s*/, '').trim()
-                );
-            }
-            uniqueQuestions.push(q);
-        }
-    }
-
-    const sortedQuestions = uniqueQuestions.sort((a, b) => {
-        const diffScore: Record<string, number> = { 'Easy': 1, 'Medium': 2, 'Hard': 3 };
-        const scoreA = diffScore[a.difficulty || 'Medium'] || 2;
-        const scoreB = diffScore[b.difficulty || 'Medium'] || 2;
-        return scoreA - scoreB;
-    });
-
-    const results = sortedQuestions.slice(0, total);
-
-    let placeholderIdx = 0;
-    while (results.length < total) {
-        results.push(makePlaceholder(isMath ? "Math" : "Reading_Writing", "Medium", "General", placeholderIdx++));
-    }
-
-    return results;
-}
-
-function formatTime(seconds: number) {
-    const m = Math.floor(seconds / 60).toString().padStart(2, "0");
-    const s = (seconds % 60).toString().padStart(2, "0");
-    return `${m}:${s}`;
-}
-
-export default function BluebookSession() {
-    const [stage, setStage] = useState<Stage>(1);
-    const [phase, setPhase] = useState<Phase>("loading");
-    const [questions, setQuestions] = useState<Question[]>([]);
-    const [answers, setAnswers] = useState<Record<number, string>>({});
-    const [freeText, setFreeText] = useState<Record<number, string>>({});
-    const [marked, setMarked] = useState<Set<number>>(new Set());
+export default function AdaptiveBluebookSession() {
+    const [questions, setQuestions] = useState<any[]>([]);
     const [currentIndex, setCurrentIndex] = useState(0);
-    const [timerSec, setTimerSec] = useState(STAGE_CONFIG[1].seconds);
-    const [timerHidden, setTimerHidden] = useState(false);
-    const [desmosOpen, setDesmosOpen] = useState(false);
-    const [seenIds, setSeenIds] = useState<Set<string>>(new Set());
+    const [loading, setLoading] = useState(true);
+    const [userAnswers, setUserAnswers] = useState<Record<number, string>>({});
 
-    const [moduleCorrectCounts, setModuleCorrectCounts] = useState<Record<number, number>>({});
-    const [moduleWeightedScores, setModuleWeightedScores] = useState<Record<number, number>>({});
-    const [finalRWScore, setFinalRWScore] = useState(0);
-    const [finalMathScore, setFinalMathScore] = useState(0);
-    const [moduleReviews, setModuleReviews] = useState<ModuleReview[]>([]);
+    const [currentModule, setCurrentModule] = useState<'RW_M1' | 'RW_M2_Easy' | 'RW_M2_Hard' | 'MATH_M1'>('RW_M1');
+    const [moduleScore, setModuleScore] = useState(0);
 
-    const [usingMock, setUsingMock] = useState(false);
-    const [errorMsg, setErrorMsg] = useState<string | null>(null);
-    const [finishModalOpen, setFinishModalOpen] = useState(false);
-    const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-    const loadStage = useCallback(async (s: Stage, routingVal?: number, currentSeenIds?: Set<string>) => {
-        setPhase("loading");
-        setErrorMsg(null);
-        setUsingMock(false);
-        setCurrentIndex(0);
-        setAnswers({});
-        setFreeText({});
-        setMarked(new Set());
-        try {
-            const qs = await fetchQuestions(s, routingVal, currentSeenIds);
-            setQuestions(qs);
-        } catch (err: any) {
-            console.error("Fetch Failure - Falling back to local bank:", err);
-            setErrorMsg(err.message || "Unknown Connection Error");
-            setUsingMock(true);
-            const cfg = STAGE_CONFIG[s];
-            const fallback = getMockQuestions(cfg.subject, cfg.count);
-            setQuestions(fallback);
-        } finally {
-            setTimerSec(STAGE_CONFIG[s].seconds);
-            setPhase("testing");
-        }
-    }, []);
-
-    useEffect(() => { loadStage(1, undefined, new Set()); }, [loadStage]);
+    const supabase = createClientComponentClient();
 
     useEffect(() => {
-        if (phase !== "testing") { if (timerRef.current) clearInterval(timerRef.current); return; }
-        timerRef.current = setInterval(() => {
-            setTimerSec((t: number) => {
-                if (t <= 1) { clearInterval(timerRef.current!); handleModuleEnd(); return 0; }
-                return t - 1;
-            });
-        }, 1000);
-        return () => { if (timerRef.current) clearInterval(timerRef.current); };
-    }, [phase]);
+        async function fetchModule() {
+            setLoading(true);
+            let domainsToFetch: string[] = [];
+            let questionLimit = 27;
+            let difficultyFilter = null;
 
-    const handleModuleEnd = () => {
-        if (timerRef.current) clearInterval(timerRef.current);
+            if (currentModule === 'RW_M1') {
+                domainsToFetch = ['Information_Ideas', 'Craft_Structure', 'Expression_Ideas', 'Standard_English'];
+                questionLimit = 27;
+            } else if (currentModule === 'RW_M2_Easy') {
+                domainsToFetch = ['Information_Ideas', 'Craft_Structure', 'Expression_Ideas', 'Standard_English'];
+                difficultyFilter = 'Easy';
+                questionLimit = 27;
+            } else if (currentModule === 'RW_M2_Hard') {
+                domainsToFetch = ['Information_Ideas', 'Craft_Structure', 'Expression_Ideas', 'Standard_English'];
+                difficultyFilter = 'Hard';
+                questionLimit = 27;
+            } else if (currentModule === 'MATH_M1') {
+                domainsToFetch = ['Heart_of_Algebra', 'Advanced_Math', 'Problem_Solving_Data', 'Geometry_Trigonometry'];
+                questionLimit = 22;
+            }
 
-        const cfg = STAGE_CONFIG[stage];
-        let correctRaw = 0;
-        for (let i = 0; i < cfg.count; i++) {
-            const q = questions[i];
-            if (!q) continue;
-            const userAnswer = q.options ? (answers[i] || "") : (freeText[i] || "");
-            if (isUserResponseCorrect(q, userAnswer)) correctRaw++;
+            // Fix: Querying by 'domain' instead of 'section' to prevent the 400 error
+            let query = supabase.from('sat_question_bank').select('*').in('domain', domainsToFetch);
+            if (difficultyFilter) {
+                query = query.eq('difficulty', difficultyFilter);
+            }
+
+            const { data, error } = await query.limit(questionLimit * 3);
+
+            if (error) {
+                console.error("Supabase Fetch Error:", error);
+                setLoading(false);
+                return;
+            }
+
+            // Deduplication and Text Cleanup
+            const uniqueQuestions = [];
+            const seenText = new Set();
+
+            for (const q of data || []) {
+                if (!seenText.has(q.question_text)) {
+                    seenText.add(q.question_text);
+                    if (Array.isArray(q.options)) {
+                        // Strips "A) " or "B. " from options
+                        q.options = q.options.map((opt: string) => opt.replace(/^[a-dA-D][\)\.\-]\s*/, '').trim());
+                    }
+                    uniqueQuestions.push(q);
+                }
+            }
+
+            setQuestions(uniqueQuestions.slice(0, questionLimit));
+            setCurrentIndex(0);
+            setUserAnswers({});
+            setLoading(false);
         }
 
-        const weighted = calculateModuleWeightedScore(questions, answers, freeText, cfg.count);
-        setModuleCorrectCounts(prev => ({ ...prev, [stage]: correctRaw }));
-        setModuleWeightedScores(prev => ({ ...prev, [stage]: weighted }));
-        setModuleReviews(prev => {
-            const snapshot: ModuleReview = {
-                stage,
-                label: cfg.label,
-                questions: questions.map(q => ({
-                    ...q,
-                    options: q.options ? [...q.options] : q.options
-                })),
-                answers: { ...answers },
-                freeText: { ...freeText },
-            };
+        fetchModule();
+    }, [currentModule, supabase]);
 
-            const withoutCurrent = prev.filter(mod => mod.stage !== stage);
-            return [...withoutCurrent, snapshot].sort((a, b) => a.stage - b.stage);
+    const handleAnswerSelect = (answer: string) => {
+        setUserAnswers(prev => ({ ...prev, [currentIndex]: answer }));
+    };
+
+    const submitModule = () => {
+        let correctCount = 0;
+        questions.forEach((q, idx) => {
+            if (userAnswers[idx] === q.correct_answer) {
+                correctCount++;
+            }
         });
+        setModuleScore(correctCount);
 
-        if (stage === 1 || stage === 3) {
-            setPhase("between");
-        } else if (stage === 2) {
-            const m1Correct = moduleCorrectCounts[1] || 0;
-            const isHigher = (m1Correct / STAGE_CONFIG[1].count) >= 0.65;
-            const scaled = calculateSectionScaledScore(moduleWeightedScores[1] || 0, weighted, isHigher);
-            setFinalRWScore(scaled);
-            setPhase("between");
-        } else if (stage === 4) {
-            const m3Correct = moduleCorrectCounts[3] || 0;
-            const isHigher = (m3Correct / STAGE_CONFIG[3].count) >= 0.65;
-            const mathScaled = calculateSectionScaledScore(moduleWeightedScores[3] || 0, weighted, isHigher);
-            setFinalMathScore(mathScaled);
-            setPhase("complete");
+        if (currentModule === 'RW_M1') {
+            if (correctCount >= 15) {
+                setCurrentModule('RW_M2_Hard');
+            } else {
+                setCurrentModule('RW_M2_Easy');
+            }
+        } else if (currentModule === 'RW_M2_Easy' || currentModule === 'RW_M2_Hard') {
+            setCurrentModule('MATH_M1');
+        } else {
+            alert(`Test Complete! Final Math Score: ${correctCount}`);
         }
     };
 
-    const handleNextModule = () => {
-        const next = (stage + 1) as Stage;
-        if (next > 4) { setPhase("complete"); return; }
-        const accuracyPct = Math.round(((moduleCorrectCounts[stage] || 0) / STAGE_CONFIG[stage].count) * 100);
-        setStage(next);
-
-        const newSeen = new Set(seenIds);
-        questions.forEach((q: Question) => {
-            if (!q.is_placeholder) newSeen.add(q.id);
-        });
-        setSeenIds(newSeen);
-
-        loadStage(next, accuracyPct, newSeen);
-    };
-
-    if (phase === "loading") {
-        return (
-            <div className="h-screen w-screen flex flex-col items-center justify-center bg-white text-black font-sans text-center">
-                <Loader2 className="w-10 h-10 text-blue-600 animate-spin mb-4 mx-auto" />
-                <div className="text-xl font-medium">Synchronizing Question Bank...</div>
-                <div className="text-xs text-gray-400 mt-2 uppercase tracking-widest">Digital SAT Secure Environment</div>
-            </div>
-        );
-    }
-
-    if (errorMsg && questions.length === 0) {
-        return (
-            <div className="h-screen w-screen flex flex-col items-center justify-center bg-white text-black font-sans p-8 text-center">
-                <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-6 mx-auto">
-                    <AlertCircle className="w-8 h-8 text-red-600" />
-                </div>
-                <h2 className="text-2xl font-bold mb-2">Sync Connection Failed</h2>
-                <p className="text-gray-600 max-w-md mb-8 mx-auto">
-                    {errorMsg?.includes("Failed to fetch") || errorMsg?.includes("timeout")
-                        ? "The database connection timed out. This usually means the Supabase project is paused or there is a network restriction."
-                        : errorMsg || "The question bank could not be reached. Please check your internet connection and try again."}
-                </p>
-                <div className="flex gap-4 justify-center">
-                    <button
-                        onClick={() => window.location.reload()}
-                        className="px-8 py-3 bg-black text-white rounded-full font-bold hover:bg-gray-800 transition-all border border-black shadow-md hover:-translate-y-0.5"
-                    >
-                        Retry Connection
-                    </button>
-                    <a href="/" className="px-8 py-3 border border-black rounded-full font-bold hover:bg-gray-50 transition-all shadow-sm">
-                        Back to Home
-                    </a>
-                </div>
-                <div className="mt-12 p-4 bg-gray-50 rounded border border-gray-200 font-mono text-[10px] text-gray-400 max-w-lg mx-auto">
-                    DEBUG_RAW_ERROR: {errorMsg} <br />
-                    PROJECT_ENDPOINT: {supabaseUrl ? (supabaseUrl.includes('//') ? supabaseUrl.split('//')[1].split('.')[0] : supabaseUrl.split('.')[0]) : "NOT_FOUND"}
-                </div>
-            </div>
-        );
-    }
-
-    if (phase === "between") {
-        const cfg = STAGE_CONFIG[stage as 1 | 2 | 3 | 4];
-        return (
-            <div className="h-screen w-screen flex flex-col items-center justify-center bg-white text-black font-sans text-center p-8">
-                <p className="text-sm tracking-widest uppercase text-gray-500 mb-3">Section Complete</p>
-                <h2 className="text-3xl font-bold mb-4">{cfg.label}</h2>
-                <p className="text-gray-600 mb-8">Take a moment to rest. The next module will adjust to your performance.</p>
-                {stage < 4 ? (
-                    <button onClick={handleNextModule} className="bg-blue-600 text-white border-none rounded-md px-8 py-3 text-lg font-bold cursor-pointer hover:bg-blue-700">
-                        Begin Next Module →
-                    </button>
-                ) : (
-                    <button onClick={() => setPhase("complete")} className="bg-green-500 text-white border-none rounded-md px-8 py-3 text-lg font-bold cursor-pointer hover:bg-green-600">
-                        View Results →
-                    </button>
-                )}
-            </div>
-        );
-    }
-
-    if (phase === "complete") {
-        return (
-            <div className="min-h-screen flex flex-col items-center justify-start bg-white text-black font-sans text-center p-8">
-                <p className="text-xs tracking-widest uppercase text-gray-500 mb-3">Practice Performance</p>
-                <h2 className="text-8xl font-black mb-0 leading-none tracking-tighter">{finalRWScore + finalMathScore}</h2>
-                <p className="text-sm text-gray-500 mb-8 uppercase tracking-widest">Total Scaled Score (400–1600)</p>
-
-                <div className="grid grid-cols-2 gap-8 mb-12 w-full max-w-xl">
-                    <div className="p-8 bg-gray-50 rounded-xl border border-gray-200 border-l-4 border-l-blue-500 shadow-sm">
-                        <p className="text-4xl font-extrabold m-0">{finalRWScore}</p>
-                        <p className="text-xs text-gray-500 uppercase font-bold mt-2">Reading & Writing</p>
-                    </div>
-                    <div className="p-8 bg-gray-50 rounded-xl border border-gray-200 border-l-4 border-l-red-500 shadow-sm">
-                        <p className="text-4xl font-extrabold m-0">{finalMathScore}</p>
-                        <p className="text-xs text-gray-500 uppercase font-bold mt-2">Mathematics</p>
-                    </div>
-                </div>
-
-                <a href="/" className="bg-[#E6D5F8] text-black border border-black rounded-full px-10 py-3 text-base font-bold cursor-pointer no-underline hover:bg-[#D4BFEF] transition-colors">
-                    Return to Home
-                </a>
-
-                <section className="w-full max-w-5xl mt-12 text-left border-t border-gray-200 pt-10">
-                    <p className="text-xs tracking-widest uppercase text-gray-500 mb-2">Reflection / Review</p>
-                    <h3 className="text-3xl font-bold mb-8">Correct Answers</h3>
-
-                    {moduleReviews.length === 0 ? (
-                        <p className="text-gray-600">No module responses were captured for review.</p>
-                    ) : (
-                        <div className="space-y-8">
-                            {moduleReviews.map((module) => (
-                                <article key={module.stage} className="border border-gray-200 rounded-xl p-6 bg-white shadow-sm">
-                                    <h4 className="text-xl font-bold mb-1">{module.label}</h4>
-                                    <p className="text-xs text-gray-500 uppercase tracking-widest mb-6">
-                                        Answers were hidden during testing. Correct answers are shown here only after all 4 modules.
-                                    </p>
-
-                                    <div className="space-y-4">
-                                        {module.questions.map((q, idx) => {
-                                            const userRaw = q.options ? (module.answers[idx] || "") : (module.freeText[idx] || "");
-                                            const isCorrect = isUserResponseCorrect(q, userRaw);
-                                            const userLabel = getUserAnswerLabel(q, module.answers[idx], module.freeText[idx]);
-                                            const correctLabel = getCorrectAnswerLabel(q);
-
-                                            return (
-                                                <div key={`${module.stage}-${q.id}-${idx}`} className="rounded-lg border border-gray-200 p-4 bg-gray-50">
-                                                    <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Question {idx + 1}</p>
-                                                    <p className="text-base font-semibold text-[#1a1a1a] mb-3">
-                                                        {q.question_text || "Question text unavailable."}
-                                                    </p>
-                                                    <p className="text-sm text-gray-700 mb-1">
-                                                        <span className="font-semibold">Your answer:</span> {userLabel}
-                                                    </p>
-                                                    <p className="text-sm text-gray-700">
-                                                        <span className="font-semibold">Correct answer:</span> {correctLabel}
-                                                    </p>
-                                                    <p className={`text-xs font-bold uppercase tracking-wider mt-3 ${isCorrect ? "text-green-700" : "text-red-700"}`}>
-                                                        {isCorrect ? "Correct" : "Incorrect"}
-                                                    </p>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                </article>
-                            ))}
-                        </div>
-                    )}
-                </section>
-            </div>
-        );
-    }
-
-    if (questions.length === 0) {
-        return <div className="h-screen w-screen flex items-center justify-center bg-white text-red-600 text-xl font-bold font-sans">Error: Question Bank Empty or 400 Bad Request.</div>;
-    }
+    if (loading) return <div className="h-screen flex items-center justify-center bg-[#F3F4F6] text-black">Loading Secure Test Environment...</div>;
+    if (questions.length === 0) return <div className="h-screen flex items-center justify-center bg-[#F3F4F6] text-red-600">Error: Not enough questions in database.</div>;
 
     const currentQ = questions[currentIndex];
-    const isMathStage = stage === 3 || stage === 4;
-    const cfg = STAGE_CONFIG[stage];
 
     return (
-        <div className="flex flex-col h-screen w-screen bg-white font-sans overflow-hidden select-none">
-            {/* 1. BLUEBOOK HEADER */}
-            <header className="h-[52px] bg-[#1E2532] flex items-center justify-between px-6 text-white shrink-0 shadow-md z-10 relative">
-                <div className="flex items-center gap-4">
-                    <span className="text-[10px] font-black uppercase tracking-wider px-3 py-1.5 hover:bg-white/10 rounded-full cursor-pointer transition-colors border border-white/10">Directions ▼</span>
-                    <span className="text-[10px] font-black uppercase tracking-widest border-l border-white/20 pl-4 py-1 text-gray-400">{cfg.label}</span>
-                    {usingMock && (
-                        <span className="bg-[#E67E22] text-white text-[9px] px-3 py-1 rounded-full font-black uppercase tracking-widest flex items-center gap-1.5 shadow-lg border border-white/10">
-                            <WifiOff className="w-3 h-3" /> Local Mode
-                        </span>
-                    )}
-                </div>
+        <div className="h-screen w-screen flex flex-col bg-[#F3F4F6] overflow-hidden font-sans text-black">
 
-                {/* Timer Area */}
-                <div className="absolute left-1/2 transform -translate-x-1/2 flex flex-col items-center">
-                    <button
-                        onClick={() => setTimerHidden(!timerHidden)}
-                        className="flex flex-col items-center px-6 py-1 hover:bg-white/10 rounded-full transition-colors border border-transparent hover:border-white/5"
-                    >
-                        {!timerHidden && <span className="font-black text-lg font-mono tracking-widest">{formatTime(timerSec)}</span>}
-                        <span className="text-[9px] font-black uppercase tracking-widest text-gray-500">{timerHidden ? "Show Timer" : "Hide"}</span>
-                    </button>
-                </div>
-
-                <div className="flex items-center gap-4">
-                    {isMathStage && (
-                        <button onClick={() => setDesmosOpen(!desmosOpen)} className="bg-white/5 hover:bg-white/15 p-2 rounded-full border border-white/10 transition-all active:scale-90">
-                            <span className="sr-only">Calculator</span>
-                            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect width="18" height="18" x="3" y="3" rx="2" /><path d="M7 8h10M7 12h10M7 16h10" /></svg>
-                        </button>
-                    )}
-                    <button
-                        onClick={handleModuleEnd}
-                        className="bg-white text-black px-5 py-1.5 rounded-full text-xs font-black uppercase tracking-widest hover:bg-gray-200 transition-all active:scale-95 shadow-lg"
-                    >
-                        Finish Session
-                    </button>
-                    <button
-                        onClick={() => setMarked((prev: Set<number>) => {
-                            const n = new Set(prev);
-                            n.has(currentIndex) ? n.delete(currentIndex) : n.add(currentIndex);
-                            return n;
-                        })}
-                        className={`p-2 rounded-full transition-all active:scale-90 border ${marked.has(currentIndex) ? 'bg-[#f59e0b] border-[#f59e0b] text-white shadow-lg' : 'bg-transparent border-white/10 text-gray-400 hover:text-white'}`}
-                    >
-                        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 21l-7-4-7 4V5a2 2 0 012-2h10a2 2 0 012 2v16z" /></svg>
-                    </button>
+            <header className="h-[60px] bg-[#242b35] text-white flex justify-between items-center px-4 shrink-0 shadow-md z-10">
+                <div className="flex items-center space-x-3">
+                    <span className="text-gray-300 text-sm font-bold pl-2 tracking-widest uppercase">
+                        {currentModule.replace('_', ' — ')}
+                    </span>
                 </div>
             </header>
 
-            {/* 2. SPLIT SCREEN BODY */}
-            <main className="flex-1 flex overflow-hidden border-t-2 border-[#1a1a2e] bg-[#f8fafc]">
-                {/* Left Pane: Question & Prompt Text (WAS RIGHT) */}
-                <div className="w-1/2 overflow-y-auto border-r border-black/5 bg-white/85 backdrop-blur-sm">
-                    <div className="p-12 max-w-2xl mx-auto h-full">
-                        {!currentQ.is_placeholder && (
-                            <div className="text-[1.15rem] font-medium leading-[1.8] mb-10 text-[#1a1a1a] select-text">
-                                {currentQ.question_text}
-                            </div>
-                        )}
-
-                        {currentQ.raw_original_text && (
-                            <div className="text-[1.15rem] leading-[1.8] text-[#1a1a1a] font-serif select-text text-justify border border-black/5 rounded-[3rem] p-12 bg-white/50 backdrop-blur-sm shadow-2xl ring-1 ring-black/5">
-                                {currentQ.raw_original_text}
-                            </div>
-                        )}
-
-                        {!currentQ.raw_original_text && !currentQ.is_placeholder && !currentQ.question_text && (
-                            <div className="text-gray-400 italic font-medium">Processing question context...</div>
-                        )}
+            <main className="flex-1 flex flex-row w-full max-w-[1600px] mx-auto p-4 gap-4 overflow-hidden">
+                <div className="w-1/2 bg-white rounded-lg shadow-sm border border-gray-300 overflow-y-auto p-8 relative">
+                    <div className="text-lg leading-[1.8] text-gray-900">
+                        {currentQ.raw_original_text || "Read the following text and answer the question."}
                     </div>
                 </div>
 
-                {/* Right Pane: Answer Choices (WAS LEFT) */}
-                <div className="w-1/2 overflow-y-auto bg-[#f8fafc]/50 backdrop-blur-sm">
-                    <div className="p-12 max-w-xl mx-auto h-full">
-                        <div className="flex items-center gap-5 mb-12">
-                            <span className="w-12 h-12 flex items-center justify-center bg-[#1a1a2e] text-white rounded-2xl shadow-xl font-black text-xl">
-                                {currentIndex + 1}
-                            </span>
-                            <span className="text-[10px] font-black uppercase tracking-[0.3em] text-[#1a1a2e]/40">Answer Selection</span>
-                        </div>
+                <div className="w-1/2 bg-white rounded-lg shadow-sm border border-gray-300 overflow-y-auto p-8 relative flex flex-col">
+                    <div className="flex items-center space-x-2 mb-6 text-sm font-bold bg-[#242b35] text-white w-fit px-3 py-1 rounded">
+                        <span>{currentIndex + 1}</span>
+                    </div>
 
-                        {currentQ.is_placeholder ? (
-                            <div className="glass-card border border-red-200/50 rounded-3xl p-10 bg-red-50/50 text-red-700 font-bold backdrop-blur-md">
-                                Warning: Question Metadata Unavailable
-                            </div>
-                        ) : currentQ.options && currentQ.options.length > 0 ? (
-                            <fieldset className="space-y-4">
-                                {currentQ.options.map((opt: string, idx: number) => {
-                                    const letter = CHOICE_LETTERS[idx];
-                                    const selected = answers[currentIndex] === letter;
-                                    return (
-                                        <label
-                                            key={idx}
-                                            className={`flex items-start p-6 rounded-full cursor-pointer transition-all border-2 group shadow-sm backdrop-blur-sm ${selected ? 'bg-[#1a1a2e]/5 border-[#1a1a2e] ring-1 ring-[#1a1a2e]' : 'bg-white/90 border-transparent hover:border-[#1a1a2e]/30 hover:bg-white'}`}
-                                        >
-                                            <input type="radio" name="answer" className="hidden" onChange={() => setAnswers(prev => ({ ...prev, [currentIndex]: letter }))} checked={selected} />
-                                            <div className={`w-9 h-9 rounded-full border-2 flex items-center justify-center font-black mr-5 shrink-0 transition-all ${selected ? 'bg-[#1a1a2e] text-white border-[#1a1a2e] shadow-md scale-105' : 'border-[#1a1a2e]/20 text-[#1a1a2e]/40 bg-white group-hover:bg-white'}`}>
-                                                {letter}
-                                            </div>
-                                            <span className={`text-[1.1rem] leading-relaxed pt-1.5 transition-colors ${selected ? 'text-[#1a1a2e] font-black' : 'text-gray-600 font-medium'}`}>
-                                                {opt}
-                                            </span>
-                                        </label>
-                                    );
-                                })}
-                            </fieldset>
-                        ) : (
-                            <div className="bg-white/80 backdrop-blur-md p-10 rounded-3xl border border-black/5 shadow-2xl ring-1 ring-black/5">
-                                <label className="block text-[10px] font-black text-[#1a1a2e]/40 mb-5 uppercase tracking-[0.25em]">Response Input</label>
-                                <input
-                                    type="text"
-                                    value={freeText[currentIndex] ?? ""}
-                                    onChange={e => setFreeText(prev => ({ ...prev, [currentIndex]: e.target.value }))}
-                                    placeholder="Value"
-                                    maxLength={5}
-                                    className="w-full px-8 py-5 border-2 border-black/10 rounded-2xl text-3xl text-center outline-none focus:border-[#1a1a2e] focus:ring-8 focus:ring-[#1a1a2e]/5 font-mono font-bold tracking-[0.1em] shadow-inner bg-white/50"
-                                />
-                            </div>
-                        )}
+                    <div className="text-xl mb-8 font-medium leading-relaxed">{currentQ.question_text}</div>
+
+                    <div className="flex flex-col space-y-3 mt-auto">
+                        {currentQ.options?.map((opt: string, idx: number) => {
+                            const letters = ['A', 'B', 'C', 'D'];
+                            const isSelected = userAnswers[currentIndex] === opt;
+                            return (
+                                <label key={idx} className={`group relative flex items-start p-4 border-2 rounded-xl cursor-pointer transition-all bg-white ${isSelected ? 'border-[#004de6] bg-[#f0f5ff]' : 'border-gray-300 hover:border-[#004de6]'}`}>
+                                    <input type="radio" name="answer" className="hidden" onChange={() => handleAnswerSelect(opt)} checked={isSelected} />
+                                    <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center font-bold mr-4 shrink-0 ${isSelected ? 'border-solid border-[#004de6] bg-[#004de6] text-white' : 'border-dashed border-gray-400 text-black group-hover:border-solid group-hover:border-[#004de6]'}`}>
+                                        {letters[idx]}
+                                    </div>
+                                    <span className="text-lg pt-0.5">{opt}</span>
+                                </label>
+                            );
+                        })}
                     </div>
                 </div>
             </main>
 
-            {/* 3. THE "PACK" (Bottom Navigation Grid) */}
-            <footer className="h-[80px] bg-white/95 backdrop-blur-sm flex items-center justify-between px-10 shrink-0 border-t border-black/5 z-10 w-full relative shadow-[0_-10px_30px_-15px_rgba(0,0,0,0.05)]">
-                <div className="flex items-center sm:w-1/4 gap-5">
-                    <span className="w-12 h-12 bg-[#1a1a2e] text-white flex items-center justify-center rounded-full font-black text-sm shadow-lg">DS</span>
-                    <div className="flex flex-col">
-                        <span className="text-[10px] font-black uppercase tracking-widest text-[#1a1a2e]">Dhruv Shah</span>
-                        <button className="text-[9px] font-black uppercase tracking-wider text-gray-400 hover:text-black transition-colors text-left uppercase pr-4">Navigator ▲</button>
-                    </div>
-                </div>
+            <footer className="h-[80px] bg-white border-t border-gray-300 flex items-center justify-between px-6 shrink-0 z-10">
+                <div className="w-1/4 font-semibold text-gray-800 tracking-wide">Dhruv Shah</div>
 
-                {/* The Bluebook Square Nav */}
-                <div className="flex gap-2 overflow-x-auto px-4 w-full sm:w-1/2 justify-center pb-2 pt-2 items-center flex-nowrap scrollbar-hide">
-                    {questions.map((q, idx) => {
-                        const isAnswered = q.options ? !!answers[idx] : !!freeText[idx];
-                        const isMarked = marked.has(idx);
-                        const isCurrent = currentIndex === idx;
-
+                <div className="flex-1 flex justify-center space-x-1 overflow-x-auto px-4">
+                    {questions.map((_, idx) => {
+                        const isAnswered = !!userAnswers[idx];
                         return (
                             <button
                                 key={idx}
                                 onClick={() => setCurrentIndex(idx)}
-                                className={`w-9 h-9 flex items-center justify-center text-[10px] font-black transition-all relative shrink-0 rounded-lg shadow-sm
-                                     ${isCurrent ? 'bg-[#1a1a2e] text-white ring-4 ring-[#1a1a2e]/10 scale-110 z-10 font-black' : ''} 
-                                     ${!isCurrent && isAnswered ? 'bg-[#1a1a2e]/10 text-[#1a1a2e]' : ''}
-                                     ${!isCurrent && !isAnswered ? 'bg-white text-gray-400 border border-black/5 hover:bg-gray-100 hover:border-black/20' : ''}
-                                     ${isMarked && !isCurrent ? 'border-2 border-orange-400' : ''}
-                                 `}
+                                className={`w-9 h-9 flex items-center justify-center text-sm font-bold border rounded-[3px] transition-colors ${currentIndex === idx
+                                        ? 'bg-[#004de6] text-white border-[#004de6]'
+                                        : isAnswered ? 'bg-gray-200 text-black border-gray-400' : 'bg-white text-gray-800 border-gray-400 border-dashed hover:border-solid hover:border-gray-500'
+                                    }`}
                             >
                                 {idx + 1}
-                                {isMarked && (
-                                    <span className="absolute -top-1.5 -right-1.5 text-orange-500 drop-shadow-sm scale-125">🚩</span>
-                                )}
                             </button>
-                        );
+                        )
                     })}
                 </div>
 
-                <div className="flex gap-4 sm:w-1/4 justify-end">
-                    <button
-                        onClick={() => setCurrentIndex(prev => Math.max(0, prev - 1))}
-                        className="px-8 py-3 bg-transparent border border-black/10 text-gray-400 font-black rounded-full hover:bg-black hover:text-white disabled:opacity-30 disabled:pointer-events-none transition-all text-[10px] uppercase tracking-[0.2em] hidden sm:inline-block active:scale-95"
-                        disabled={currentIndex === 0}
-                    >
-                        Back
-                    </button>
-
-                    <button
-                        onClick={() => currentIndex === questions.length - 1 ? handleModuleEnd() : setCurrentIndex(prev => prev + 1)}
-                        className="px-10 py-3 bg-[#1a1a2e] text-white font-black rounded-full hover:bg-black shadow-[0_10px_20px_-5px_rgba(26,26,46,0.3)] transition-all text-[10px] uppercase tracking-[0.25em] flex items-center gap-1 active:scale-95 hover:-translate-y-0.5"
-                    >
-                        {currentIndex === questions.length - 1 ? 'Finish' : 'Next'}
-                    </button>
+                <div className="w-1/4 flex justify-end space-x-4">
+                    {currentIndex === questions.length - 1 ? (
+                        <button onClick={submitModule} className="px-8 py-2.5 bg-green-600 text-white font-bold rounded-full hover:bg-green-700 shadow-md transition-colors">
+                            Submit Module
+                        </button>
+                    ) : (
+                        <button onClick={() => setCurrentIndex(prev => prev + 1)} className="px-8 py-2.5 bg-[#004de6] text-white font-bold rounded-full hover:bg-blue-800 shadow-md transition-colors">
+                            Next
+                        </button>
+                    )}
                 </div>
             </footer>
-
-            {/* Desmos Calculator Float */}
-            {desmosOpen && isMathStage && (
-                <DesmosCalculator onClose={() => setDesmosOpen(false)} />
-            )}
         </div>
     );
 }
