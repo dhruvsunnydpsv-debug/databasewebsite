@@ -68,6 +68,7 @@ for raw_q in RAW_QUESTIONS:
             "difficulty": new_data["difficulty"],
             "raw_original_text": raw_q,
             "module": 1,
+            "rationale": "",
             "created_at": "now()"
         }
         try:
