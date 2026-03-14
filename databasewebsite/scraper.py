@@ -33,49 +33,51 @@ GROQ_API_KEY = os.environ["GROQ_API_KEY"]
 QUESTIONS_PER_RUN = 25        # 25q × 96 runs/day = 2,400/day
 MODEL = "llama-3.3-70b-versatile"
 
-# ── Rotation Endpoints for Pagination Strategy ──────────────
+# ── Rotation Sources for clean text context ──────────────
 EXTERNAL_SOURCES = [
-    "https://api.crossref.org/works?query=science&select=title,abstract&rows=10&offset=",
-    "https://openlibrary.org/search.json?q=history&limit=10&page=",
-    "https://gutendex.com/books/?topic=education&page=",
+    "https://gutendex.com/books/?topic=science&page=",
+    "https://gutendex.com/books/?topic=history&page=",
+    "https://gutendex.com/books/?topic=literature&page=",
+    "https://newsapi.org/v2/everything?q=technology&pageSize=5&page=", # Note: Needs key if used, otherwise fallback
 ]
 
-# ── All 26 question buckets (module, domain, difficulty, is_spr) ───────────
+# ── All 16 core question buckets (module, domain, difficulty, is_spr) ───────────
 ALL_BUCKETS = [
-    # Math — Heart of Algebra (~35%)
-    ("Math", "Heart_of_Algebra",        "Easy",   False),
-    ("Math", "Heart_of_Algebra",        "Medium", False),
-    ("Math", "Heart_of_Algebra",        "Hard",   False),
-    ("Math", "Heart_of_Algebra",        "Hard",   True),   # SPR (grid-in)
+    # Math — Algebra (~35%)
+    ("Math", "Algebra",                           "Easy",   False),
+    ("Math", "Algebra",                           "Medium", False),
+    ("Math", "Algebra",                           "Hard",   False),
+    ("Math", "Algebra",                           "Hard",   True),
     # Math — Advanced Math (~35%)
-    ("Math", "Advanced_Math",           "Easy",   False),
-    ("Math", "Advanced_Math",           "Medium", False),
-    ("Math", "Advanced_Math",           "Hard",   False),
-    ("Math", "Advanced_Math",           "Hard",   True),   # SPR
-    # Math — Problem Solving & Data Analysis (~15%)
-    ("Math", "Problem_Solving_Data",    "Easy",   False),
-    ("Math", "Problem_Solving_Data",    "Medium", False),
-    ("Math", "Problem_Solving_Data",    "Hard",   False),
-    # Math — Geometry & Trigonometry (~15%)
-    ("Math", "Geometry_Trigonometry",   "Easy",   False),
-    ("Math", "Geometry_Trigonometry",   "Medium", False),
-    ("Math", "Geometry_Trigonometry",   "Hard",   False),
-    # Reading & Writing — Information and Ideas (~26%)
-    ("Reading_Writing", "Information_Ideas",        "Easy",   False),
-    ("Reading_Writing", "Information_Ideas",        "Medium", False),
-    ("Reading_Writing", "Information_Ideas",        "Hard",   False),
+    ("Math", "Advanced Math",                     "Easy",   False),
+    ("Math", "Advanced Math",                     "Medium", False),
+    ("Math", "Advanced Math",                     "Hard",   False),
+    ("Math", "Advanced Math",                     "Hard",   True),
+    # Math — Problem-solving and Data Analysis (~15%)
+    ("Math", "Problem-solving and Data Analysis", "Easy",   False),
+    ("Math", "Problem-solving and Data Analysis", "Medium", False),
+    ("Math", "Problem-solving and Data Analysis", "Hard",   False),
+    # Math — Geometry and Trigonometry (~15%)
+    ("Math", "Geometry and Trigonometry",         "Easy",   False),
+    ("Math", "Geometry and Trigonometry",         "Medium", False),
+    ("Math", "Geometry and Trigonometry",         "Hard",   False),
+
     # Reading & Writing — Craft and Structure (~28%)
-    ("Reading_Writing", "Craft_Structure",          "Easy",   False),
-    ("Reading_Writing", "Craft_Structure",          "Medium", False),
-    ("Reading_Writing", "Craft_Structure",          "Hard",   False),
-    # Reading & Writing — Expression of Ideas (~20%)
-    ("Reading_Writing", "Expression_Ideas",          "Easy",   False),
-    ("Reading_Writing", "Expression_Ideas",          "Medium", False),
-    ("Reading_Writing", "Expression_Ideas",          "Hard",   False),
+    ("Reading_Writing", "Craft and Structure",          "Easy",   False),
+    ("Reading_Writing", "Craft and Structure",          "Medium", False),
+    ("Reading_Writing", "Craft and Structure",          "Hard",   False),
+    # Reading & Writing — Information and Ideas (~26%)
+    ("Reading_Writing", "Information and Ideas",        "Easy",   False),
+    ("Reading_Writing", "Information_and_Ideas",        "Medium", False),
+    ("Reading_Writing", "Information and Ideas",        "Hard",   False),
     # Reading & Writing — Standard English Conventions (~26%)
-    ("Reading_Writing", "Standard_English", "Easy",   False),
-    ("Reading_Writing", "Standard_English", "Medium", False),
-    ("Reading_Writing", "Standard_English", "Hard",   False),
+    ("Reading_Writing", "Standard English Conventions", "Easy",   False),
+    ("Reading_Writing", "Standard English Conventions", "Medium", False),
+    ("Reading_Writing", "Standard English Conventions", "Hard",   False),
+    # Reading & Writing — Expression of Ideas (~20%)
+    ("Reading_Writing", "Expression of Ideas",          "Easy",   False),
+    ("Reading_Writing", "Expression of Ideas",          "Medium", False),
+    ("Reading_Writing", "Expression of Ideas",          "Hard",   False),
 ]
 
 TARGET_PER_BUCKET = 500  # Long-term target; drives deficit weighting
@@ -122,54 +124,60 @@ def build_target_queue(supabase: Client) -> list:
 # ─────────────────────────────────────────────────────────────
 # PROMPT BUILDER
 # ─────────────────────────────────────────────────────────────
+# ── Sub-domain Map (Syllabus 2026) ──────────────
+SUBDOMAINS = {
+    "Algebra": ["Linear equations in one variable", "Linear equations in two variables", "Linear functions", "Systems of two linear equations", "Linear inequalities"],
+    "Advanced Math": ["Equivalent expressions", "Nonlinear equations in one variable", "Systems of equations in two variables", "Nonlinear functions"],
+    "Problem-solving and Data Analysis": ["Ratios, rates, proportional relationships", "Percentages", "One-variable data", "Two-variable data", "Probability and conditional probability"],
+    "Geometry and Trigonometry": ["Area and volume formulae", "Lines, angles, and triangles", "Right triangles and trigonometry", "Circles"],
+    "Craft and Structure": ["Words in Context", "Text Structure and Purpose", "Cross-Text Connections"],
+    "Information and Ideas": ["Central Ideas and Details", "Command of Evidence (Textual)", "Command of Evidence (Quantitative)"],
+    "Standard English Conventions": ["Boundaries", "Form, Structure, and Sense"],
+    "Expression of Ideas": ["Rhetorical Synthesis", "Transitions"]
+}
+
 def build_prompt(module: str, domain: str, difficulty: str, is_spr: bool, raw_source: str) -> str:
-    domain_display = domain.replace("_", " ")
-    module_display = "Math" if module == "Math" else "Reading_Writing"
+    sub_choices = SUBDOMAINS.get(domain, [])
+    sd = random.choice(sub_choices) if sub_choices else "General"
+    
     spr_note = (
-        "This is a Student-Produced Response (SPR / grid-in). NO multiple-choice options. "
-        "Set is_spr=true and options=null. The student writes a numeric answer."
+        "SPR / Grid-in. NO options. Numeric answer."
     ) if is_spr else (
-        "This has 4 multiple-choice options (A, B, C, D). Set is_spr=false. "
-        "Provide exactly 4 distinct, plausible options."
+        "Multiple-choice. 4 distinct options (A, B, C, D)."
     )
 
-    return f"""You are a Digital SAT question writer and copyright-sanitization engine.
-
-Generate ONE brand-new Digital SAT question with EXACTLY these attributes:
-  Section   : {module_display}
+    return f"""You are an elite Digital SAT content creator for the 2026 Syllabus.
+TASK: Generate ONE high-fidelity question based on these constraints:
+  Module    : {module}
   Domain    : {domain}
+  Sub-domain: {sd}
   Difficulty: {difficulty}
-  {spr_note}
+  Format    : {spr_note}
 
-You are forced to output a JSON object. For the 'module', 'domain', and 'difficulty' keys, you MUST pick exactly one string from the following allowed lists. DO NOT invent your own categories. If you use spaces, the system will crash.
-
-ALLOWED MODULES: "Math", "Reading_Writing"
-ALLOWED DOMAINS: "Heart_of_Algebra", "Advanced_Math", "Problem_Solving_Data", "Geometry_Trigonometry", "Information_Ideas", "Craft_Structure", "Expression_Ideas", "Standard_English"
-ALLOWED DIFFICULTIES: "Easy", "Medium", "Hard"
-
-Here is some raw inspirational source material scraped from the web:
-[RAW_SOURCE_START]
-{raw_source}
-[RAW_SOURCE_END]
-
-RULES:
-1. Synthesize a question inspired by the math/logic or reading topic of the RAW_SOURCE if applicable, but do a strict Entity Swap.
-2. Use completely fictional names, places, companies, scenarios — no real text from the source.
-3. Keep all math/logic/grammar mechanics identical to real College Board style.
-4. Difficulty must match: Easy=single-step, Medium=2-3 steps, Hard=multi-concept or trap.
-5. For RW questions, include a short passage (2-4 sentences) in question_text before the question.
-
-Respond with ONLY a valid JSON object — no markdown, no extra text:
+JSON Schema:
 {{
-  "module": "{module_display}",
+  "module": "{module}",
   "domain": "{domain}",
+  "sub_domain": "{sd}",
   "difficulty": "{difficulty}",
   "is_spr": {str(is_spr).lower()},
-  "question_text": "<full question text>",
-  "options": {("null" if is_spr else '["<option A>", "<option B>", "<option C>", "<option D>"]')},
-  "correct_answer": "<exact correct option text OR numeric value for SPR>",
-  "rationale": "<1-2 sentence explanation>"
-}}"""
+  "question_text": "The full question text. For RW, must include a high-quality passage.",
+  "options": {("null" if is_spr else '["Choice A", "Choice B", "Choice C", "Choice D"]')},
+  "correct_answer": "The exact correct response string.",
+  "rationale": "Logical explanation of why this is correct."
+}}
+
+RULES:
+1. PASSAGE QUALITY: If RW, write a sophisticated 3-5 sentence passage. DO NOT use JSON, code, or metadata in texts.
+2. ENTITY SWAP: If using the provided RAW_SOURCE, change all names, dates, and locations.
+3. LOGIC CHECK: Ensure the correct_answer is mathematically or grammatically flawless.
+4. JSON ONLY: Your entire response must be the JSON object. No preamble.
+
+RAW SOURCE MATERIAL (Scraped context):
+---
+{raw_source}
+---"""
+
 
 # ─────────────────────────────────────────────────────────────
 # GROQ GENERATION (Entity Swap / Synthesis)
@@ -208,18 +216,36 @@ def generate_question(client: Groq, module: str, domain: str, difficulty: str, i
 # ─────────────────────────────────────────────────────────────
 VALID_MODULES = {"Math", "Reading_Writing"}
 VALID_DOMAINS = {
-    "Heart_of_Algebra", "Advanced_Math", "Problem_Solving_Data", "Geometry_Trigonometry",
-    "Information_Ideas", "Craft_Structure", "Expression_Ideas", "Standard_English",
+    "Algebra", "Advanced Math", "Problem-solving and Data Analysis", "Geometry and Trigonometry",
+    "Craft and Structure", "Information and Ideas", "Standard English Conventions", "Expression of Ideas",
 }
 VALID_DIFFS = {"Easy", "Medium", "Hard"}
 
+def is_valid_text(txt: str) -> bool:
+    """Detects if the text looks like raw JSON, code, or metadata."""
+    if not txt: return False
+    # Heuristics for JSON/Code leakage
+    if txt.strip().startswith("{") or txt.strip().startswith("["): return False
+    if "{" in txt and "}" in txt and ":" in txt: return False # Potential object snippet
+    if "http://" in txt or "https://" in txt: return False # No URLs in SAT questions
+    if "api." in txt or ".org" in txt: return False # Metadata leakage
+    return True
+
 def validate(data: dict, exp_module: str, exp_domain: str, exp_diff: str, exp_spr: bool) -> Optional[dict]:
     if not isinstance(data, dict): return None
+    # Hard validation of text quality
+    q_text = data.get("question_text", "")
+    if not is_valid_text(q_text):
+        log.warning("Detected JSON/Code leakage in question_text — rejecting row.")
+        return None
+
     # Pin to expected values if Groq drifts
     data["module"]     = data.get("module")     if data.get("module")     in VALID_MODULES else exp_module
     data["domain"]     = data.get("domain")     if data.get("domain")     in VALID_DOMAINS else exp_domain
     data["difficulty"] = data.get("difficulty") if data.get("difficulty") in VALID_DIFFS   else exp_diff
-    if not data.get("question_text") or not data.get("correct_answer"): return None
+    
+    if not q_text or not data.get("correct_answer"): return None
+    
     is_spr = bool(data.get("is_spr", exp_spr))
     data["is_spr"] = is_spr
     if is_spr:
@@ -346,8 +372,8 @@ DO NOT make up your own tags. Pick the single best match.
 
 ALLOWED MODULES: "Math", "Reading_Writing"
 ALLOWED DOMAINS:
-  For Math: "Heart_of_Algebra", "Advanced_Math", "Problem_Solving_Data", "Geometry_Trigonometry"
-  For Reading_Writing: "Information_Ideas", "Craft_Structure", "Expression_Ideas", "Standard_English"
+  For Math: "Algebra", "Advanced Math", "Problem-solving and Data Analysis", "Geometry and Trigonometry"
+  For Reading_Writing: "Craft and Structure", "Information and Ideas", "Standard English Conventions", "Expression of Ideas"
 ALLOWED DIFFICULTIES: "Easy", "Medium", "Hard"
 
 QUESTION TEXT:

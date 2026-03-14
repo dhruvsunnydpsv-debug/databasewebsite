@@ -22,7 +22,7 @@ export const MOCK_RW_QUESTIONS: Question[] = [
         ],
         correct_answer: "A",
         raw_original_text: "Recent studies in arboriculture suggest that urban trees grow significantly faster than their rural counterparts. For instance, a survey of silver maples in Chicago found that city trees added biomass at a rate 25% higher than those in neighboring forests.",
-        domain: "Information_Ideas",
+        domain: "Information and Ideas",
         difficulty: "Medium"
     },
     {
@@ -36,7 +36,7 @@ export const MOCK_RW_QUESTIONS: Question[] = [
         ],
         correct_answer: "B",
         raw_original_text: "The discovery of the Rosetta Stone was ______ to the field of Egyptology, as it provided the key to deciphering ancient Egyptian hieroglyphs, which had previously been unreadable for centuries.",
-        domain: "Craft_Structure",
+        domain: "Craft and Structure",
         difficulty: "Easy"
     }
 ];
@@ -53,7 +53,7 @@ export const MOCK_MATH_QUESTIONS: Question[] = [
         ],
         correct_answer: "A",
         raw_original_text: "Solve for x in the linear equation and substitute into the second expression.",
-        domain: "Heart_of_Algebra",
+        domain: "Advanced Math",
         difficulty: "Easy"
     },
     {

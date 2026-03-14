@@ -315,9 +315,9 @@
             const isMath = cfg.subject === 'math';
             
             // This is a simplified fetch - normally we'd do difficulty balance here
-            const domains = isMath ? ['Heart_of_Algebra', 'Advanced_Math', 'Problem_Solving_Data', 'Geometry_Trigonometry'] : ['Information_Ideas', 'Craft_Structure', 'Expression_Ideas', 'Standard_English'];
+            const domainsToFetch = isMath ? ['Algebra', 'Advanced Math', 'Problem-solving and Data Analysis', 'Geometry and Trigonometry'] : ['Craft and Structure', 'Information and Ideas', 'Standard English Conventions', 'Expression of Ideas'];
             
-            const { data, error } = await supabase.from('sat_question_bank').select('*').in('domain', domains).limit(100);
+            const { data, error } = await supabase.from('sat_question_bank').select('*').in('domain', domainsToFetch).limit(100);
             if(error) throw error;
             
             // Shuffle and pick 24

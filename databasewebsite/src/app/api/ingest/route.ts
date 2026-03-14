@@ -7,21 +7,21 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-const SYSTEM_PROMPT = `You are an expert SAT content developer.
-TASK: perform an 'Entity Swap' on the following question.
-- Change names, locations, and objects (The 'Paint').
-- DO NOT change the numbers, logic, or correct answer (The 'Engine').
-- STRICTLY output valid JSON.
+const SYSTEM_PROMPT = `You are an elite Digital SAT content creator (2026 Syllabus).
+TASK: Convert the provided RAW text into a high-fidelity SAT question.
 
 JSON Schema:
 {
-    "domain": "String (MUST be one of: Heart_of_Algebra, Advanced_Math, Problem_Solving_Data, Geometry_Trigonometry, Information_Ideas, Craft_Structure, Expression_Ideas, Standard_English)",
-    "question_text": "The new re-written question text",
-    "options": ["Option A", "Option B", "Option C", "Option D"],
-    "correct_answer": "The correct option text",
-    "difficulty": "Medium",
-    "rationale": "",
-    "module": 1
+  "module": "Reading_Writing OR Math",
+  "domain": "One of: Algebra, Advanced Math, Problem-solving and Data Analysis, Geometry and Trigonometry, Craft and Structure, Information and Ideas, Standard English Conventions, Expression of Ideas",
+  "sub_domain": "Specific skill name (e.g., 'Words in Context')",
+  "difficulty": "Easy, Medium, Hard",
+  "question_text": "Sophisticated text. For RW, must be a 3-5 sentence passage. NO raw JSON or code.",
+  "is_spr": false,
+  "options": ["Choice A", "Choice B", "Choice C", "Choice D"],
+  "correct_answer": "Exact correct choice text",
+  "rationale": "One sentence explanation",
+  "module": "Math or Reading_Writing"
 }`;
 
 export async function POST(req: Request) {
@@ -61,16 +61,28 @@ export async function POST(req: Request) {
 
                 const parsed = JSON.parse(rawResponse);
 
+                // Sanity Check: Reject if question_text looks like JSON/Code
+                const qText = parsed.question_text || "";
+                const looksLikeJson = qText.trim().startsWith('{') || qText.trim().startsWith('[') || (qText.includes('{') && qText.includes(':'));
+                const hasMetadata = qText.includes('api.') || qText.includes('.org') || qText.includes('http');
+                
+                if (looksLikeJson || hasMetadata) {
+                    console.error("Inbound question rejected: Detected JSON/Metadata leakage.");
+                    return NextResponse.json({ error: "Validation failed: Inbound content contains code snippets or metadata." }, { status: 400 });
+                }
+
                 const dbPayload = {
+                    module: parsed.module || "Math",
                     domain: parsed.domain,
-                    question_text: parsed.question_text,
+                    sub_domain: parsed.sub_domain,
+                    difficulty: parsed.difficulty,
+                    question_text: qText,
+                    is_spr: !!parsed.is_spr,
                     options: parsed.options,
                     correct_answer: parsed.correct_answer,
-                    difficulty: parsed.difficulty,
-                    rationale: parsed.rationale || "",
-                    module: parsed.module || 1,
-                    raw_original_text: raw_q, // Ensuring original text goes straight to UI Audit Log
-                    source_method: 'Admin_Dropzone'
+                    rationale: parsed.rationale,
+                    raw_original_text: text.slice(0, 1000),
+                    source_method: "Admin_Dropzone"
                 };
 
                 const { data: insertedData, error: dbError } = await supabase

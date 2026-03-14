@@ -29,7 +29,7 @@ ALLOWED MODULES:
 
 ALLOWED DOMAINS (Choose exactly one based on the module):
 For Math: "Heart_of_Algebra", "Advanced_Math", "Problem_Solving_Data", "Geometry_Trigonometry"
-For Reading_Writing: "Information_Ideas", "Craft_Structure", "Expression_Ideas", "Standard_English"
+For Reading_Writing: "Information_and_Ideas", "Craft_and_Structure", "Expression_of_Ideas", "Standard_English_Conventions"
 
 ALLOWED DIFFICULTIES:
 "Easy", "Medium", "Hard"
@@ -94,7 +94,10 @@ def main():
             
             # Simple validation to ensure the tags match the strict enums exactly
             valid_modules = ["Math", "Reading_Writing"]
-            valid_domains = ["Heart_of_Algebra", "Advanced_Math", "Problem_Solving_Data", "Geometry_Trigonometry", "Information_Ideas", "Craft_Structure", "Expression_Ideas", "Standard_English"]
+            valid_domains = [
+                "Algebra", "Advanced Math", "Problem-solving and Data Analysis", "Geometry and Trigonometry",
+                "Craft and Structure", "Information and Ideas", "Standard English Conventions", "Expression of Ideas"
+            ]
             valid_diffs = ["Easy", "Medium", "Hard"]
             
             if module in valid_modules and domain in valid_domains and difficulty in valid_diffs:

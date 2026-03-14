@@ -13,70 +13,73 @@ SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") # Use Service Role Ke
 groq_client = Groq(api_key=GROQ_API_KEY)
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# THE SOURCE MATERIAL (Add your raw questions here)
-RAW_QUESTIONS = [
-    "If 3x + 5 = 20, what is the value of 2x - 1?",
-    "The sum of two numbers is 10 and their difference is 4. What is the larger number?",
-    # ... paste your 100 questions here ...
-]
+# ── SUBDOMAINS MAP (Syllabus 2026) ──────────────
+SUBDOMAINS = {
+    "Algebra": ["Linear equations", "Linear functions", "Systems of linear equations", "Linear inequalities"],
+    "Advanced Math": ["Equivalent expressions", "Nonlinear equations", "Nonlinear functions"],
+    "Problem-solving and Data Analysis": ["Ratios and rates", "Percentages", "Data distributions", "Probability"],
+    "Geometry and Trigonometry": ["Area and volume", "Lines and angles", "Triangles", "Right triangles", "Circles"],
+    "Craft and Structure": ["Words in Context", "Text Structure", "Cross-Text Connections"],
+    "Information and Ideas": ["Central Ideas", "Command of Evidence"],
+    "Standard English Conventions": ["Boundaries", "Form and Usage", "Punctuation"],
+    "Expression of Ideas": ["Rhetorical Synthesis", "Transitions"]
+}
 
-def generate_sat_question(raw_text):
+def generate_sat_question(client: Groq, raw_text: str):
     """
-    Forces Llama 3.1 70B to rewrite the question while keeping logic identical.
+    Takes a raw source and has Groq synthesize a structured SAT question.
     """
-    prompt = f"""
-    You are an expert SAT content developer.
-    TASK: perform an 'Entity Swap' on the following question.
-    - Change names, locations, and objects (The 'Paint').
-    - DO NOT change the numbers, logic, or correct answer (The 'Engine').
-    - STRICTLY output valid JSON.
-
-    Raw Question: "{raw_text}"
-
+    prompt = f"""You are a senior SAT editor for the 2026 Digital syllabus.
+    SOURCE: "{raw_text}"
+    
+    TASK: Write a new Digital SAT question based on the content of the source above.
+    
     JSON Schema:
     {{
-        "domain": "String (MUST be one of: Heart_of_Algebra, Advanced_Math, Problem_Solving_Data, Geometry_Trigonometry, Information_Ideas, Craft_Structure, Expression_Ideas, Standard_English)",
-        "question_text": "The new re-written question text",
-        "options": ["Option A", "Option B", "Option C", "Option D"],
-        "correct_answer": "The correct option text",
-        "difficulty": "Medium"
+      "module": "Reading_Writing OR Math",
+      "domain": "One of: Algebra, Advanced Math, Problem-solving and Data Analysis, Geometry and Trigonometry, Craft and Structure, Information and Ideas, Standard English Conventions, Expression of Ideas",
+      "sub_domain": "Specific skill name",
+      "difficulty": "Easy, Medium, or Hard",
+      "question_text": "Clean text only. No code. No JSON leakage.",
+      "is_spr": false,
+      "options": ["A", "B", "C", "D"],
+      "correct_answer": "Correct text",
+      "rationale": "One sentence explaining logic."
     }}
-    """
+    
+    Strictly output JSON."""
+
     try:
-        completion = groq_client.chat.completions.create(
+        response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.5,
             response_format={"type": "json_object"}
         )
-        return json.loads(completion.choices[0].message.content)
+        data = json.loads(response.choices[0].message.content)
+
+        # Database Insertion
+        db_payload = {
+            "module": data.get("module"),
+            "domain": data.get("domain"),
+            "sub_domain": data.get("sub_domain"),
+            "difficulty": data.get("difficulty"),
+            "question_text": data.get("question_text"),
+            "is_spr": data.get("is_spr", False),
+            "options": data.get("options"),
+            "correct_answer": data.get("correct_answer"),
+            "rationale": data.get("rationale"),
+            "raw_original_text": raw_text[:1000],
+            "source_method": "AI_HARVEST"
+        }
+
+        result = supabase.table("sat_question_bank").insert(db_payload).execute()
+        print(f"Added: {data.get('domain')} - {data.get('difficulty')}")
+        return result
     except Exception as e:
-        print(f"Skipping question due to AI error: {e}")
+        print(f"Error: {e}")
         return None
 
-print("Starting Harvest...")
-
-for raw_q in RAW_QUESTIONS:
-    print(f"Processing: {raw_q[:30]}...")
-    new_data = generate_sat_question(raw_q)
-    if new_data:
-        payload = {
-            "domain": new_data["domain"],
-            "question_text": new_data["question_text"],
-            "options": new_data["options"],
-            "correct_answer": new_data["correct_answer"],
-            "difficulty": new_data["difficulty"],
-            "raw_original_text": raw_q,
-            "module": 1,
-            "rationale": "",
-            "source_method": "AI_HARVEST",
-            "created_at": "now()"
-        }
-        try:
-            data, count = supabase.table("sat_question_bank").insert(payload).execute()
-            print("✅ Saved!")
-        except Exception as e:
-            print(f"❌ Database Error: {e}")
-    time.sleep(1)
-
-print("Harvest Complete.")
+if __name__ == "__main__":
+    # Example harvest
+    sample_text = "Scientists have long debated the origin of the Moon. The leading theory suggests a giant impact..."
+    generate_sat_question(groq_client, sample_text)

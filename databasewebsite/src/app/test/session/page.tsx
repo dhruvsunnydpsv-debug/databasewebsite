@@ -21,18 +21,18 @@ export default function AdaptiveBluebookSession() {
             let difficultyFilter = null;
 
             if (currentModule === 'RW_M1') {
-                domainsToFetch = ['Information_Ideas', 'Craft_Structure', 'Expression_Ideas', 'Standard_English'];
+                domainsToFetch = ['Craft and Structure', 'Information and Ideas', 'Standard English Conventions', 'Expression of Ideas'];
                 questionLimit = 27;
             } else if (currentModule === 'RW_M2_Easy') {
-                domainsToFetch = ['Information_Ideas', 'Craft_Structure', 'Expression_Ideas', 'Standard_English'];
+                domainsToFetch = ['Craft and Structure', 'Information and Ideas', 'Standard English Conventions', 'Expression of Ideas'];
                 difficultyFilter = 'Easy';
                 questionLimit = 27;
             } else if (currentModule === 'RW_M2_Hard') {
-                domainsToFetch = ['Information_Ideas', 'Craft_Structure', 'Expression_Ideas', 'Standard_English'];
+                domainsToFetch = ['Craft and Structure', 'Information and Ideas', 'Standard English Conventions', 'Expression of Ideas'];
                 difficultyFilter = 'Hard';
                 questionLimit = 27;
             } else if (currentModule === 'MATH_M1') {
-                domainsToFetch = ['Heart_of_Algebra', 'Advanced_Math', 'Problem_Solving_Data', 'Geometry_Trigonometry'];
+                domainsToFetch = ['Algebra', 'Advanced Math', 'Problem-solving and Data Analysis', 'Geometry and Trigonometry'];
                 questionLimit = 22;
             }
 

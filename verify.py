@@ -27,15 +27,21 @@ for d in all_data:
         ids_to_delete.add(d['id'])
         continue
         
-    # Check for garbage JSON blobs (like Open Library API responses)
-    if '{"numFound"' in raw_text or '"author_key"' in raw_text or '{"author_key"' in raw_text:
+    # Check for garbage JSON blobs (like Open Library/CrossRef API responses)
+    json_sigs = ['{"numFound"', '"author_key"', '"DOI"', '"message":', '"status":"ok"', '"items":[']
+    if any(sig in raw_text for sig in json_sigs):
         ids_to_delete.add(d['id'])
         continue
         
+    # Check for code/metadata in the actual question text
+    if '{"module"' in q_text or '{"domain"' in q_text or '```json' in q_text:
+        ids_to_delete.add(d['id'])
+        continue
+
     # If the raw text is literally just a massive JSON object instead of a question
     raw_text_stripped = raw_text.strip()
     if (raw_text_stripped.startswith('{') and raw_text_stripped.endswith('}')) or (raw_text_stripped.startswith('[') and raw_text_stripped.endswith(']')):
-        if len(raw_text_stripped) > 100 and '"' in raw_text_stripped and ':' in raw_text_stripped:
+        if len(raw_text_stripped) > 50 and (':' in raw_text_stripped or '"' in raw_text_stripped):
              ids_to_delete.add(d['id'])
              continue
 
