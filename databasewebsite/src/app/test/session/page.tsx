@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import { supabase } from '@/lib/supabase';
 
 export default function AdaptiveBluebookSession() {
     const [questions, setQuestions] = useState<any[]>([]);
@@ -10,8 +10,6 @@ export default function AdaptiveBluebookSession() {
 
     const [currentModule, setCurrentModule] = useState<'RW_M1' | 'RW_M2_Easy' | 'RW_M2_Hard' | 'MATH_M1'>('RW_M1');
     const [moduleScore, setModuleScore] = useState(0);
-
-    const supabase = createClientComponentClient();
 
     useEffect(() => {
         async function fetchModule() {

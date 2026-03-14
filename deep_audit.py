@@ -21,7 +21,7 @@ if not all([SUPABASE_URL, SUPABASE_KEY, GROQ_API_KEY]):
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 groq_client = Groq(api_key=GROQ_API_KEY)
-MODEL = "llama-3.3-70b-versatile"
+MODEL = "llama-3.1-8b-instant"
 
 # 2026 Syllabus Mapping
 VALID_MODULES = ["Math", "Reading_Writing"]
