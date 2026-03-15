@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "Next.js Dev",
+      "runtimeExecutable": "/usr/local/bin/npm",
+      "runtimeArgs": ["--prefix", "/Users/dhruvshah/CODING-SAT PREP/databasewebsite", "run", "dev"],
+      "port": 3000
+    }
+  ]
+}
