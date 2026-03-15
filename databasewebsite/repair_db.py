@@ -4,6 +4,12 @@ import logging
 import time
 from supabase import create_client, Client
 from groq import Groq
+from dotenv import load_dotenv
+
+# Load credentials from .env (search in current and parent dir)
+load_dotenv()
+if not os.environ.get("GROQ_API_KEY"):
+    load_dotenv("../.env")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
@@ -13,11 +19,12 @@ SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("NE
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
 if not all([SUPABASE_URL, SUPABASE_KEY, GROQ_API_KEY]):
-    raise ValueError("Missing required environment variables: NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (or ANON), GROQ_API_KEY")
+    missing = [k for k, v in {"URL": SUPABASE_URL, "KEY": SUPABASE_KEY, "GROQ": GROQ_API_KEY}.items() if not v]
+    raise ValueError(f"Missing: {', '.join(missing)}. Please check your .env file.")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 groq_client = Groq(api_key=GROQ_API_KEY)
-MODEL = "llama-3.3-70b-versatile"
+MODEL = "llama-3.1-8b-instant"
 
 def repair_tags(row_id: str, question_text: str):
     prompt = f"""You are a strict database evaluation engine.
@@ -28,8 +35,8 @@ ALLOWED MODULES:
 "Reading_Writing"
 
 ALLOWED DOMAINS (Choose exactly one based on the module):
-For Math: "Heart_of_Algebra", "Advanced_Math", "Problem_Solving_Data", "Geometry_Trigonometry"
-For Reading_Writing: "Information_and_Ideas", "Craft_and_Structure", "Expression_of_Ideas", "Standard_English_Conventions"
+For Math: "Algebra", "Advanced Math", "Problem-solving and Data Analysis", "Geometry and Trigonometry"
+For Reading_Writing: "Craft and Structure", "Information and Ideas", "Standard English Conventions", "Expression of Ideas"
 
 ALLOWED DIFFICULTIES:
 "Easy", "Medium", "Hard"

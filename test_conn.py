@@ -1,5 +1,10 @@
 import os
 from supabase import create_client
+from dotenv import load_dotenv
+
+load_dotenv()
+if not os.environ.get("NEXT_PUBLIC_SUPABASE_URL"):
+    load_dotenv("../.env")
 
 url = os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
 key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("NEXT_PUBLIC_SUPABASE_ANON_KEY")

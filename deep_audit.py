@@ -4,6 +4,12 @@ import logging
 import time
 from supabase import create_client, Client
 from groq import Groq
+from dotenv import load_dotenv
+
+# Load credentials from .env (search in current and parent dir)
+load_dotenv()
+if not os.environ.get("GROQ_API_KEY"):
+    load_dotenv("../.env")
 
 # ─────────────────────────────────────────────────────────────
 # CONFIG

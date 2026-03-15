@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Syllabus Migration Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        body { background: #0f172a; color: white; font-family: 'Inter', sans-serif; }
+        .card { background: #1e293b; border: 1px solid #334155; }
+        .progress-bar { transition: width 0.5s ease-in-out; }
+        .status-dot { height: 10px; width: 10px; border-radius: 50%; display: inline-block; }
+    </style>
+</head>
+<body class="p-8">
+    <div class="max-w-4xl mx-auto">
+        <div class="flex justify-between items-center mb-4">
+            <div>
+                <h1 class="text-3xl font-bold">2026 SAT Syllabus Migration</h1>
+                <p class="text-slate-400">Live Database Audit & Re-categorization</p>
+            </div>
+            <div id="connection-status" class="px-3 py-1 bg-slate-800 rounded-full text-xs font-mono">
+                <span class="status-dot bg-yellow-500 mr-2"></span>Connecting...
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div class="card p-6 rounded-xl">
+                <h3 class="text-sm font-medium text-slate-400 uppercase tracking-wider">Total Questions</h3>
+                <p id="total-count" class="text-3xl font-bold mt-2">...</p>
+            </div>
+            <div class="card p-6 rounded-xl border-green-500/30">
+                <h3 class="text-sm font-medium text-slate-400 uppercase tracking-wider">Migrated (2026)</h3>
+                <p id="migrated-count" class="text-3xl font-bold mt-2 text-green-400">...</p>
+            </div>
+            <div class="card p-6 rounded-xl border-blue-500/30">
+                <h3 class="text-sm font-medium text-slate-400 uppercase tracking-wider">Completion</h3>
+                <p id="percent-complete" class="text-3xl font-bold mt-2 text-blue-400">0%</p>
+            </div>
+        </div>
+
+        <div class="card p-8 rounded-xl mb-8">
+            <div class="flex justify-between mb-4">
+                <span class="text-sm font-semibold">Audit Progress</span>
+                <span id="progress-text" class="text-sm text-slate-400">Initializing...</span>
+            </div>
+            <div class="w-full bg-slate-700 rounded-full h-4 overflow-hidden">
+                <div id="progress-bar" class="progress-bar bg-blue-500 h-full w-0"></div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div class="card p-6 rounded-xl overflow-hidden">
+                <h3 class="text-lg font-bold mb-4">Syllabus Distribution</h3>
+                <div id="distribution-list" class="space-y-3">
+                </div>
+            </div>
+            <div class="card p-6 rounded-xl overflow-hidden">
+                <h3 class="text-lg font-bold mb-4">Latest Audit Log</h3>
+                <div id="log-list" class="space-y-2 font-mono text-xs text-slate-400 max-h-64 overflow-y-auto">
+                    <p>> Loaded Dashboard</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function addLog(msg, type='info') {
+            const list = document.getElementById('log-list');
+            const p = document.createElement('p');
+            p.className = type === 'error' ? 'text-red-400' : 'text-slate-400';
+            p.innerText = `> [${new Date().toLocaleTimeString()}] ${msg}`;
+            list.prepend(p);
+        }
+
+        async function updateStats() {
+            try {
+                const response = await fetch('/api/stats');
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                const data = await response.json();
+
+                if (data.error) throw new Error(data.error);
+
+                document.getElementById('total-count').innerText = data.total;
+                document.getElementById('migrated-count').innerText = data.migrated;
+                
+                const percent = data.total > 0 ? Math.round((data.migrated / data.total) * 100) : 0;
+                document.getElementById('percent-complete').innerText = percent + "%";
+                document.getElementById('progress-bar').style.width = percent + "%";
+                document.getElementById('progress-text').innerText = `${data.migrated} of ${data.total} migrated`;
+
+                document.getElementById('connection-status').innerHTML = '<span class="status-dot bg-green-500 mr-2"></span>Live';
+                addLog(`Success: ${data.migrated}/${data.total} audited.`);
+
+                // Distribution
+                let html = "";
+                for (const d of data.distribution) {
+                    const dPercent = data.total > 0 ? Math.round((d.count / data.total) * 100) : 0;
+                    html += `
+                        <div class="flex items-center gap-4">
+                            <span class="w-48 text-sm truncate" title="${d.name}">${d.name}</span>
+                            <div class="flex-1 bg-slate-700 h-1 rounded-full">
+                                <div class="bg-blue-400 h-full rounded-full" style="width: ${dPercent}%"></div>
+                            </div>
+                            <span class="text-xs font-mono w-8 text-right">${d.count}</span>
+                        </div>
+                    `;
+                }
+                document.getElementById('distribution-list').innerHTML = html;
+
+            } catch (err) {
+                console.error("Dashboard error:", err);
+                addLog("Update Failed: " + String(err), "error");
+                document.getElementById('connection-status').innerHTML = '<span class="status-dot bg-red-500 mr-2"></span>Error';
+            }
+        }
+
+        async function init() {
+            addLog("Dashboard initialized.");
+            updateStats();
+            setInterval(updateStats, 10000);
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>
