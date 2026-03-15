@@ -7,44 +7,55 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-// Domain values MUST match sat_question_bank.domain exactly (underscore format)
+// Domain values MUST match the actual DB CHECK constraint (space format)
 const SYSTEM_PROMPT = `You are an elite Digital SAT content creator (2026 Syllabus).
-TASK: Apply the Entity Swap technique to the provided RAW text. Keep the core logic/math/structure identical, but swap out names, locations, and surface-level entities.
+TASK: Apply the Entity Swap technique to the provided RAW text. Keep the core logic/math/structure identical, swap out names and surface entities.
 
-Return ONLY valid JSON matching this exact schema. No extra fields, no markdown, no explanation.
+Return ONLY valid JSON. No extra fields, no markdown, no explanation.
 
 {
-  "domain": "MUST be exactly one of: Information_Ideas | Craft_Structure | Expression_Ideas | Standard_English | Heart_of_Algebra | Advanced_Math | Problem_Solving_Data | Geometry_Trigonometry",
+  "module": "MUST be exactly: Reading_Writing OR Math",
+  "domain": "MUST be exactly one of: Information and Ideas | Craft and Structure | Expression of Ideas | Standard English Conventions | Algebra | Advanced Math | Problem-solving and Data Analysis | Geometry and Trigonometry",
   "difficulty": "Easy | Medium | Hard",
   "question_text": "The synthesized question text. No JSON, no code, no URLs.",
   "options": ["Option text A", "Option text B", "Option text C", "Option text D"],
-  "correct_answer": "Exact text of the correct option (must match one of the options strings exactly)"
+  "correct_answer": "Exact text of the correct option (must match one of the options strings exactly)",
+  "rationale": "One sentence explanation of why the correct answer is correct."
 }`;
 
-// Map AI output domain to valid DB domain in case AI still returns wrong format
+// Real DB domain values (space format matching schema.sql CHECK constraint)
+const RW_DOMAINS = new Set(['Information and Ideas', 'Craft and Structure', 'Expression of Ideas', 'Standard English Conventions']);
+const MATH_DOMAINS = new Set(['Algebra', 'Advanced Math', 'Problem-solving and Data Analysis', 'Geometry and Trigonometry']);
+const VALID_MODULES = new Set(['Reading_Writing', 'Math']);
+const VALID_DIFFICULTIES = new Set(['Easy', 'Medium', 'Hard']);
+
+// Normalizer for AI returning wrong format
 const DOMAIN_NORMALIZER: Record<string, string> = {
-    'Information_Ideas': 'Information_Ideas',
-    'Information and Ideas': 'Information_Ideas',
-    'Craft_Structure': 'Craft_Structure',
-    'Craft and Structure': 'Craft_Structure',
-    'Expression_Ideas': 'Expression_Ideas',
-    'Expression of Ideas': 'Expression_Ideas',
-    'Standard_English': 'Standard_English',
-    'Standard English Conventions': 'Standard_English',
-    'Heart_of_Algebra': 'Heart_of_Algebra',
-    'Algebra': 'Heart_of_Algebra',
-    'Heart of Algebra': 'Heart_of_Algebra',
-    'Advanced_Math': 'Advanced_Math',
-    'Advanced Math': 'Advanced_Math',
-    'Problem_Solving_Data': 'Problem_Solving_Data',
-    'Problem-solving and Data Analysis': 'Problem_Solving_Data',
-    'Problem Solving and Data Analysis': 'Problem_Solving_Data',
-    'Geometry_Trigonometry': 'Geometry_Trigonometry',
-    'Geometry and Trigonometry': 'Geometry_Trigonometry',
+    'Information and Ideas': 'Information and Ideas',
+    'Information_Ideas': 'Information and Ideas',
+    'Craft and Structure': 'Craft and Structure',
+    'Craft_Structure': 'Craft and Structure',
+    'Expression of Ideas': 'Expression of Ideas',
+    'Expression_Ideas': 'Expression of Ideas',
+    'Standard English Conventions': 'Standard English Conventions',
+    'Standard_English': 'Standard English Conventions',
+    'Algebra': 'Algebra',
+    'Heart_of_Algebra': 'Algebra',
+    'Heart of Algebra': 'Algebra',
+    'Advanced Math': 'Advanced Math',
+    'Advanced_Math': 'Advanced Math',
+    'Problem-solving and Data Analysis': 'Problem-solving and Data Analysis',
+    'Problem_Solving_Data': 'Problem-solving and Data Analysis',
+    'Problem Solving and Data Analysis': 'Problem-solving and Data Analysis',
+    'Geometry and Trigonometry': 'Geometry and Trigonometry',
+    'Geometry_Trigonometry': 'Geometry and Trigonometry',
 };
 
-const VALID_DOMAINS = new Set(Object.values(DOMAIN_NORMALIZER));
-const VALID_DIFFICULTIES = new Set(['Easy', 'Medium', 'Hard']);
+const MODULE_FROM_DOMAIN = (domain: string): string => {
+    if (RW_DOMAINS.has(domain)) return 'Reading_Writing';
+    if (MATH_DOMAINS.has(domain)) return 'Math';
+    return '';
+};
 
 export async function POST(req: Request) {
     try {
@@ -56,8 +67,6 @@ export async function POST(req: Request) {
         }
 
         const rawFileText = await file.text();
-
-        // Split on double newlines — each block is one source question
         const rawQuestions = rawFileText.split(/\n\s*\n/).map(q => q.trim()).filter(q => q.length > 10);
 
         if (rawQuestions.length === 0) {
@@ -82,71 +91,65 @@ export async function POST(req: Request) {
                 if (!rawResponse) continue;
 
                 let parsed: any;
-                try {
-                    parsed = JSON.parse(rawResponse);
-                } catch {
-                    console.error("JSON parse failed for response:", rawResponse);
-                    continue;
-                }
+                try { parsed = JSON.parse(rawResponse); } catch { continue; }
 
                 const qText: string = (parsed.question_text || "").trim();
-
-                // Reject if question_text is empty or looks like leaked JSON/code
                 if (!qText || qText.startsWith('{') || qText.startsWith('[') || qText.includes('http')) {
-                    console.error("Rejected: question_text looks like JSON or metadata:", qText.slice(0, 100));
+                    console.error("Rejected: bad question_text:", qText.slice(0, 80));
                     continue;
                 }
 
-                // Normalize domain to DB-valid underscore format
                 const normalizedDomain: string = DOMAIN_NORMALIZER[parsed.domain] || "";
-                if (!VALID_DOMAINS.has(normalizedDomain)) {
-                    console.error("Rejected: unknown domain value:", parsed.domain);
+                if (!normalizedDomain) {
+                    console.error("Rejected: unknown domain:", parsed.domain);
                     continue;
                 }
 
-                // Normalize difficulty
                 const difficulty: string = parsed.difficulty || "Medium";
-                if (!VALID_DIFFICULTIES.has(difficulty)) {
-                    console.error("Rejected: unknown difficulty value:", difficulty);
-                    continue;
-                }
+                if (!VALID_DIFFICULTIES.has(difficulty)) continue;
 
-                // Validate options array
                 if (!Array.isArray(parsed.options) || parsed.options.length !== 4) {
-                    console.error("Rejected: options must be array of 4 strings");
+                    console.error("Rejected: options must be 4-element array");
                     continue;
                 }
 
-                // Validate correct_answer matches one of the options
                 const correctAnswer: string = (parsed.correct_answer || "").trim();
                 if (!parsed.options.includes(correctAnswer)) {
-                    console.error("Rejected: correct_answer does not match any option:", correctAnswer);
+                    console.error("Rejected: correct_answer not in options:", correctAnswer);
                     continue;
                 }
 
-                // Build payload using ONLY columns that exist in sat_question_bank
+                // Derive module from domain — required NOT NULL column
+                const module = MODULE_FROM_DOMAIN(normalizedDomain);
+                if (!module) { console.error("Rejected: could not determine module from domain:", normalizedDomain); continue; }
+
+                // Build payload matching ALL required columns in schema.sql
                 const dbPayload = {
+                    module,
                     domain: normalizedDomain,
                     difficulty,
                     question_text: qText,
                     options: parsed.options,
                     correct_answer: correctAnswer,
+                    rationale: (parsed.rationale || '').trim() || `The correct answer is: ${correctAnswer}`,
+                    is_spr: false,
+                    source_method: 'Admin_Dropzone',
                     raw_original_text: raw_q,
                 };
 
                 const { data: insertedData, error: dbError } = await supabase
                     .from('sat_question_bank')
                     .insert(dbPayload)
-                    .select('id, domain, difficulty, question_text, options, correct_answer')
+                    .select('id, module, domain, difficulty, question_text, options, correct_answer')
                     .single();
 
                 if (dbError) {
-                    console.error("Supabase Insertion Error:", dbError.message, "Payload:", JSON.stringify(dbPayload));
+                    console.error("Supabase Insertion Error:", dbError.message);
                 } else {
                     results.push(insertedData);
                 }
             } catch (err: any) {
-                console.error("Error processing question block:", err.message);
+                console.error("Error processing block:", err.message);
             }
         }
 

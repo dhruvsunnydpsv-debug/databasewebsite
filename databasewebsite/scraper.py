@@ -1,14 +1,17 @@
 """
-scraper.py — SAT Automated Scraper v3 (Groq-powered)
-=========================================================
+scraper.py — SAT Question Generator v5 (Groq-powered, schema-correct)
+=============================================================================
 Runs every 15 min via GitHub Actions.
-Uses Groq's free API (Llama 3.3-70b) — 14,400 req/day free, no credit card.
+Generates self-contained, Bluebook-style SAT questions using Groq's Llama 3.3.
+NO external URL scraping. NO JSON garbage. Only real question patterns.
 
-Per run:
-  1. Reads sat_question_bank to compute per-bucket deficits (self-balancing).
-  2. Builds a 25-question queue weighted toward thinnest domain/difficulty buckets.
-  3. Calls Groq API (llama-3.3-70b-versatile) to synthesize + entity-swap each question.
-  4. Validates JSON schema and inserts into Supabase.
+Schema columns used (MUST match sat_question_bank CHECK constraints):
+  module        : 'Math' | 'Reading_Writing'
+  domain        : space-format (e.g. 'Information and Ideas', 'Algebra')
+  difficulty    : 'Easy' | 'Medium' | 'Hard'
+  is_spr        : False (always for generated MCQ)
+  source_method : 'Automated_Pipeline'
+  rationale     : required NOT NULL explanation
 """
 
 import os
@@ -30,388 +33,395 @@ SUPABASE_URL = os.environ["NEXT_PUBLIC_SUPABASE_URL"]
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ["NEXT_PUBLIC_SUPABASE_ANON_KEY"]
 GROQ_API_KEY = os.environ["GROQ_API_KEY"]
 
-QUESTIONS_PER_RUN = 25        # 25q × 96 runs/day = 2,400/day
+QUESTIONS_PER_RUN = 20
 MODEL = "llama-3.3-70b-versatile"
 
-# ── Rotation Sources for clean text context ──────────────
-EXTERNAL_SOURCES = [
-    "https://gutendex.com/books/?topic=science&page=",
-    "https://gutendex.com/books/?topic=history&page=",
-    "https://gutendex.com/books/?topic=literature&page=",
-    "https://newsapi.org/v2/everything?q=technology&pageSize=5&page=", # Note: Needs key if used, otherwise fallback
-]
+# ── Valid domain values MUST match schema.sql CHECK constraint (space format) ──
+RW_DOMAINS = {
+    "Information and Ideas",
+    "Craft and Structure",
+    "Expression of Ideas",
+    "Standard English Conventions",
+}
+MATH_DOMAINS = {
+    "Algebra",
+    "Advanced Math",
+    "Problem-solving and Data Analysis",
+    "Geometry and Trigonometry",
+}
+VALID_DOMAINS = RW_DOMAINS | MATH_DOMAINS
+VALID_DIFFICULTIES = {"Easy", "Medium", "Hard"}
 
-# ── All 16 core question buckets (module, domain, difficulty, is_spr) ───────────
+# Module mapping
+DOMAIN_TO_MODULE = {d: "Reading_Writing" for d in RW_DOMAINS}
+DOMAIN_TO_MODULE.update({d: "Math" for d in MATH_DOMAINS})
+
+# ── All buckets: (domain, difficulty) ──────────────────────────────────────────
 ALL_BUCKETS = [
-    # Math — Algebra (~35%)
-    ("Math", "Algebra",                           "Easy",   False),
-    ("Math", "Algebra",                           "Medium", False),
-    ("Math", "Algebra",                           "Hard",   False),
-    ("Math", "Algebra",                           "Hard",   True),
-    # Math — Advanced Math (~35%)
-    ("Math", "Advanced Math",                     "Easy",   False),
-    ("Math", "Advanced Math",                     "Medium", False),
-    ("Math", "Advanced Math",                     "Hard",   False),
-    ("Math", "Advanced Math",                     "Hard",   True),
-    # Math — Problem-solving and Data Analysis (~15%)
-    ("Math", "Problem-solving and Data Analysis", "Easy",   False),
-    ("Math", "Problem-solving and Data Analysis", "Medium", False),
-    ("Math", "Problem-solving and Data Analysis", "Hard",   False),
-    # Math — Geometry and Trigonometry (~15%)
-    ("Math", "Geometry and Trigonometry",         "Easy",   False),
-    ("Math", "Geometry and Trigonometry",         "Medium", False),
-    ("Math", "Geometry and Trigonometry",         "Hard",   False),
-
-    # Reading & Writing — Craft and Structure (~28%)
-    ("Reading_Writing", "Craft and Structure",          "Easy",   False),
-    ("Reading_Writing", "Craft and Structure",          "Medium", False),
-    ("Reading_Writing", "Craft and Structure",          "Hard",   False),
-    # Reading & Writing — Information and Ideas (~26%)
-    ("Reading_Writing", "Information and Ideas",        "Easy",   False),
-    ("Reading_Writing", "Information_and_Ideas",        "Medium", False),
-    ("Reading_Writing", "Information and Ideas",        "Hard",   False),
-    # Reading & Writing — Standard English Conventions (~26%)
-    ("Reading_Writing", "Standard English Conventions", "Easy",   False),
-    ("Reading_Writing", "Standard English Conventions", "Medium", False),
-    ("Reading_Writing", "Standard English Conventions", "Hard",   False),
-    # Reading & Writing — Expression of Ideas (~20%)
-    ("Reading_Writing", "Expression of Ideas",          "Easy",   False),
-    ("Reading_Writing", "Expression of Ideas",          "Medium", False),
-    ("Reading_Writing", "Expression of Ideas",          "Hard",   False),
+    # Reading & Writing
+    ("Information and Ideas",           "Easy"),   ("Information and Ideas",           "Medium"), ("Information and Ideas",           "Hard"),
+    ("Craft and Structure",              "Easy"),   ("Craft and Structure",              "Medium"), ("Craft and Structure",              "Hard"),
+    ("Expression of Ideas",             "Easy"),   ("Expression of Ideas",             "Medium"), ("Expression of Ideas",             "Hard"),
+    ("Standard English Conventions",    "Easy"),   ("Standard English Conventions",    "Medium"), ("Standard English Conventions",    "Hard"),
+    # Math
+    ("Algebra",                          "Easy"),   ("Algebra",                          "Medium"), ("Algebra",                          "Hard"),
+    ("Advanced Math",                    "Easy"),   ("Advanced Math",                    "Medium"), ("Advanced Math",                    "Hard"),
+    ("Problem-solving and Data Analysis","Easy"),   ("Problem-solving and Data Analysis","Medium"), ("Problem-solving and Data Analysis","Hard"),
+    ("Geometry and Trigonometry",        "Easy"),   ("Geometry and Trigonometry",        "Medium"), ("Geometry and Trigonometry",        "Hard"),
 ]
 
-TARGET_PER_BUCKET = 500  # Long-term target; drives deficit weighting
+TARGET_PER_BUCKET = 500
+
+# ── Rich sub-domain prompts for each domain ────────────────────────────────────
+SUBDOMAINS = {
+    "Information and Ideas": [
+        "Central Ideas and Details — identify the main claim of a short passage",
+        "Command of Evidence (Textual) — select the quote that best supports a given claim",
+        "Command of Evidence (Quantitative) — interpret data from a table or graph to answer a question",
+        "Inferences — draw a logical conclusion from evidence provided in a passage",
+    ],
+    "Craft and Structure": [
+        "Words in Context — determine the most precise meaning of an underlined word in context",
+        "Text Structure and Purpose — identify why the author included a particular sentence or detail",
+        "Cross-Text Connections — compare the perspectives of two short passages on the same topic",
+    ],
+    "Expression of Ideas": [
+        "Rhetorical Synthesis — combine information from notes into one grammatically correct sentence",
+        "Transitions — select the most logical transition word or phrase to connect two sentences",
+    ],
+    "Standard English Conventions": [
+        "Sentence Boundaries — fix comma splices, run-ons, or fragments",
+        "Subject-Verb Agreement — correct agreement errors in complex sentence structures",
+        "Pronoun Reference — fix ambiguous or incorrect pronoun antecedents",
+        "Verb Tense and Form — select the correct tense for context",
+        "Punctuation — use commas, semicolons, colons, and dashes correctly",
+        "Parallel Structure — maintain parallel form across a list or comparison",
+    ],
+    "Algebra": [
+        "Linear equations in one variable — solve or interpret ax + b = c",
+        "Linear equations in two variables — write the equation of a line from context",
+        "Systems of two linear equations — solve by substitution or elimination",
+        "Linear inequalities in one or two variables — solve and interpret on a number line or graph",
+        "Linear functions — identify slope, y-intercept, and rate of change from a table or graph",
+    ],
+    "Advanced Math": [
+        "Equivalent expressions — factor, expand, or simplify polynomial and rational expressions",
+        "Nonlinear equations in one variable — solve quadratic equations by factoring or the quadratic formula",
+        "Nonlinear functions — analyze the graph of a parabola or exponential function",
+        "Systems of equations with one nonlinear equation — solve algebraically and interpret solutions",
+    ],
+    "Problem-solving and Data Analysis": [
+        "Ratios, rates, and proportional relationships — set up and solve a proportion from context",
+        "Percentages — calculate percent change, markups, or percent of a whole",
+        "One-variable data: distributions and measures of center — mean, median, range, IQR",
+        "Two-variable data: scatterplots and lines of best fit — interpret slope and y-intercept in context",
+        "Probability and conditional probability — calculate from a two-way frequency table",
+        "Statistical inference — evaluate claims based on sample data and margin of error",
+    ],
+    "Geometry and Trigonometry": [
+        "Area and volume — apply formulas for circles, triangles, rectangles, cylinders, and cones",
+        "Lines, angles, and triangles — use parallel line angle relationships and triangle sum theorem",
+        "Right triangles and trigonometry — apply SOH-CAH-TOA and the Pythagorean theorem",
+        "Circles — arc length, sector area, central and inscribed angle theorems",
+        "Coordinate geometry — distance formula, midpoint, and equation of a circle",
+    ],
+}
+
+RW_PASSAGE_SEEDS = [
+    "a 19th-century naturalist studying bird migration patterns in South America",
+    "a contemporary marine biologist researching deep-sea bioluminescence",
+    "an archaeologist analyzing pottery shards from an ancient Mediterranean civilization",
+    "a historian examining the economic impact of railroad expansion in 19th-century America",
+    "a literary critic discussing the narrative structure of Victorian novels",
+    "a sociologist studying community cohesion in post-industrial cities",
+    "an astronomer comparing the atmospheric composition of gas giant planets",
+    "a linguist documenting the evolution of creole languages in the Caribbean",
+    "a neuroscientist investigating the role of sleep in memory consolidation",
+    "a philosopher analyzing the ethical implications of artificial intelligence",
+    "an environmental economist quantifying the cost of coastal erosion",
+    "a botanist studying the mycorrhizal networks connecting trees in old-growth forests",
+]
+
+MATH_CONTEXT_SEEDS = [
+    "a car rental company's pricing model",
+    "a school fundraiser selling two types of items",
+    "the trajectory of a ball thrown from a rooftop",
+    "a company's quarterly profit growth",
+    "a swimming pool being filled and drained simultaneously",
+    "the relationship between study hours and test scores",
+    "a farmer dividing land into rectangular plots",
+    "the depreciation of a vehicle's value over time",
+    "a scientist diluting a chemical solution",
+    "a city's population growth modeled by an exponential function",
+    "the speed of two cyclists traveling toward each other",
+    "the dimensions of a triangular sail on a yacht",
+]
+
 
 # ─────────────────────────────────────────────────────────────
 # SELF-BALANCING QUEUE BUILDER
 # ─────────────────────────────────────────────────────────────
-def build_target_queue(supabase: Client) -> list:
+def build_queue(supabase: Client) -> list:
     log.info("Querying inventory for self-balancing analysis…")
-
     existing: dict = {}
     try:
-        rows = supabase.table("sat_question_bank").select("module, domain, difficulty, is_spr").execute()
+        rows = supabase.table("sat_question_bank").select("domain, difficulty").execute()
         for r in rows.data:
-            key = (r["module"], r["domain"], r["difficulty"], bool(r.get("is_spr", False)))
+            key = (r["domain"], r["difficulty"])
             existing[key] = existing.get(key, 0) + 1
     except Exception as e:
-        log.warning(f"Could not read inventory (table may be empty): {e}")
+        log.warning(f"Could not read inventory: {e}")
 
-    # Score each bucket by deficit — emptier = higher weight
     scores = []
     for bucket in ALL_BUCKETS:
-        module, domain, difficulty, is_spr = bucket
         actual = existing.get(bucket, 0)
         deficit = max(0, TARGET_PER_BUCKET - actual) + 1
-        scores.append((module, domain, difficulty, is_spr, deficit))
-        log.info(f"  {module} | {domain} | {difficulty} | SPR={is_spr} → {actual} (deficit {deficit})")
+        scores.append((bucket[0], bucket[1], deficit))
+        log.info(f"  {bucket[0]} | {bucket[1]} → {actual} (deficit {deficit})")
 
-    total_deficit = sum(s[4] for s in scores)
+    total_deficit = sum(s[2] for s in scores)
     queue = []
-    for module, domain, difficulty, is_spr, deficit in scores:
+    for domain, difficulty, deficit in scores:
         slots = max(1, round((deficit / total_deficit) * QUESTIONS_PER_RUN))
         for _ in range(slots):
-            queue.append((module, domain, difficulty, is_spr))
+            queue.append((domain, difficulty))
 
     random.shuffle(queue)
     queue = queue[:QUESTIONS_PER_RUN]
     while len(queue) < QUESTIONS_PER_RUN:
         queue.append(random.choice(queue))
 
-    log.info(f"Queue built: {len(queue)} questions across {len(set(queue))} unique buckets.")
+    log.info(f"Queue: {len(queue)} questions across {len(set(queue))} unique buckets.")
     return queue
 
+
 # ─────────────────────────────────────────────────────────────
-# PROMPT BUILDER
+# PROMPT BUILDER — pure pattern, no external scraping
 # ─────────────────────────────────────────────────────────────
-# ── Sub-domain Map (Syllabus 2026) ──────────────
-SUBDOMAINS = {
-    "Algebra": ["Linear equations in one variable", "Linear equations in two variables", "Linear functions", "Systems of two linear equations", "Linear inequalities"],
-    "Advanced Math": ["Equivalent expressions", "Nonlinear equations in one variable", "Systems of equations in two variables", "Nonlinear functions"],
-    "Problem-solving and Data Analysis": ["Ratios, rates, proportional relationships", "Percentages", "One-variable data", "Two-variable data", "Probability and conditional probability"],
-    "Geometry and Trigonometry": ["Area and volume formulae", "Lines, angles, and triangles", "Right triangles and trigonometry", "Circles"],
-    "Craft and Structure": ["Words in Context", "Text Structure and Purpose", "Cross-Text Connections"],
-    "Information and Ideas": ["Central Ideas and Details", "Command of Evidence (Textual)", "Command of Evidence (Quantitative)"],
-    "Standard English Conventions": ["Boundaries", "Form, Structure, and Sense"],
-    "Expression of Ideas": ["Rhetorical Synthesis", "Transitions"]
-}
+def build_prompt(domain: str, difficulty: str) -> tuple[str, str]:
+    sub = random.choice(SUBDOMAINS.get(domain, ["General"]))
+    is_math = domain in MATH_DOMAINS
 
-def build_prompt(module: str, domain: str, difficulty: str, is_spr: bool, raw_source: str) -> str:
-    sub_choices = SUBDOMAINS.get(domain, [])
-    sd = random.choice(sub_choices) if sub_choices else "General"
-    
-    spr_note = (
-        "SPR / Grid-in. NO options. Numeric answer."
-    ) if is_spr else (
-        "Multiple-choice. 4 distinct options (A, B, C, D)."
-    )
+    if is_math:
+        seed = random.choice(MATH_CONTEXT_SEEDS)
+        passage_seed = f"Context: {seed}"
+        difficulty_guidance = {
+            "Easy":   "one or two steps, straightforward computation, no tricks",
+            "Medium": "multi-step, requires setting up an equation or interpreting a graph",
+            "Hard":   "complex multi-step, requires combining two concepts, abstract reasoning",
+        }[difficulty]
 
-    return f"""You are an elite Digital SAT content creator for the 2026 Syllabus.
-TASK: Generate ONE high-fidelity question based on these constraints:
-  Module    : {module}
-  Domain    : {domain}
-  Sub-domain: {sd}
-  Difficulty: {difficulty}
-  Format    : {spr_note}
+        system = f"""You are a senior Digital SAT Math question writer for the 2026 exam.
 
-JSON Schema:
+Write exactly ONE original SAT-style question with these specs:
+  Domain      : {domain}
+  Sub-domain  : {sub}
+  Difficulty  : {difficulty} ({difficulty_guidance})
+  Context seed: {seed}
+
+Rules:
+- The question must be self-contained. Include all numbers and context needed.
+- For Hard questions, involve at least two mathematical steps or a non-obvious setup.
+- Four answer choices. Exactly one is correct. Distractors must reflect common errors.
+- correct_answer must be the EXACT TEXT of the correct option.
+- rationale: one clear sentence explaining why the correct answer is correct.
+
+Return ONLY this JSON object. No markdown, no extra fields:
 {{
-  "module": "{module}",
   "domain": "{domain}",
-  "sub_domain": "{sd}",
   "difficulty": "{difficulty}",
-  "is_spr": {str(is_spr).lower()},
-  "question_text": "The full question text. For RW, must include a high-quality passage.",
-  "options": {("null" if is_spr else '["Choice A", "Choice B", "Choice C", "Choice D"]')},
-  "correct_answer": "The exact correct response string.",
-  "rationale": "Logical explanation of why this is correct."
-}}
+  "question_text": "Full question stem with all numbers included.",
+  "options": ["option text A", "option text B", "option text C", "option text D"],
+  "correct_answer": "Exact text of the correct option",
+  "rationale": "One sentence explaining why the correct answer is correct."
+}}"""
 
-RULES:
-1. PASSAGE QUALITY: If RW, write a sophisticated 3-5 sentence passage. DO NOT use JSON, code, or metadata in texts.
-2. ENTITY SWAP: If using the provided RAW_SOURCE, change all names, dates, and locations.
-3. LOGIC CHECK: Ensure the correct_answer is mathematically or grammatically flawless.
-4. JSON ONLY: Your entire response must be the JSON object. No preamble.
+    else:
+        seed = random.choice(RW_PASSAGE_SEEDS)
+        passage_seed = f"Topic: {seed}"
+        difficulty_guidance = {
+            "Easy":   "short 2-sentence passage, direct inference, obvious answer",
+            "Medium": "3-4 sentence passage, requires understanding of author's purpose or word nuance",
+            "Hard":   "4-5 sentence passage with complex syntax, subtle distinction between answer choices",
+        }[difficulty]
 
-RAW SOURCE MATERIAL (Scraped context):
----
-{raw_source}
----"""
+        system = f"""You are a senior Digital SAT Reading & Writing question writer for the 2026 exam.
+
+Write exactly ONE original SAT-style question with these specs:
+  Domain      : {domain}
+  Sub-domain  : {sub}
+  Difficulty  : {difficulty} ({difficulty_guidance})
+  Topic seed  : {seed}
+
+Rules:
+- Write an original passage appropriate to the difficulty. Use real academic/literary register.
+- The passage must NOT contain any JSON, code, URLs, or metadata.
+- question_text = the PASSAGE TEXT followed by a blank line then the question stem.
+- Four answer choices. Exactly one is correct. Wrong choices must be plausible but distinguishable.
+- correct_answer must be the EXACT TEXT of the correct option.
+- rationale: one clear sentence explaining why the correct answer is correct.
+- raw_original_text = the passage text ONLY (no question stem).
+
+Return ONLY this JSON object. No markdown, no extra fields:
+{{
+  "domain": "{domain}",
+  "difficulty": "{difficulty}",
+  "question_text": "PASSAGE TEXT\\n\\nQUESTION STEM",
+  "options": ["option text A", "option text B", "option text C", "option text D"],
+  "correct_answer": "Exact text of the correct option",
+  "rationale": "One sentence explaining why the correct answer is correct.",
+  "raw_original_text": "PASSAGE TEXT ONLY"
+}}"""
+
+    return system, passage_seed
 
 
 # ─────────────────────────────────────────────────────────────
-# GROQ GENERATION (Entity Swap / Synthesis)
+# GENERATION
 # ─────────────────────────────────────────────────────────────
-def generate_question(client: Groq, module: str, domain: str, difficulty: str, is_spr: bool, seed_page: int, raw_source: str) -> Optional[dict]:
-    # We pass the seed_page implicitly into the prompt to ensure the LLM starts from a randomized trajectory
-    prompt = build_prompt(module, domain, difficulty, is_spr, raw_source) + f"\n\nRandomization Seed Offset: {seed_page}"
+def generate_question(client: Groq, domain: str, difficulty: str) -> Optional[dict]:
+    system_prompt, seed = build_prompt(domain, difficulty)
     for attempt in range(3):
         try:
             response = client.chat.completions.create(
                 model=MODEL,
-                messages=[{"role": "user", "content": prompt}],
+                messages=[{"role": "user", "content": system_prompt}],
                 response_format={"type": "json_object"},
-                temperature=0.8,
-                max_tokens=1024,
+                temperature=0.75,
+                max_tokens=1200,
             )
             raw = response.choices[0].message.content.strip()
-            return json.loads(raw)
+            data = json.loads(raw)
+            data["_seed"] = seed
+            return data
         except json.JSONDecodeError as e:
             log.error(f"JSON parse error (attempt {attempt+1}): {e}")
-            return None
         except Exception as e:
             err = str(e)
             if "rate_limit" in err.lower() or "429" in err:
-                wait = 10 * (2 ** attempt)  # 10s, 20s, 40s
-                log.warning(f"Rate limit hit (attempt {attempt+1}). Waiting {wait}s…")
+                wait = 15 * (2 ** attempt)
+                log.warning(f"Rate limit. Waiting {wait}s…")
                 time.sleep(wait)
             else:
                 log.error(f"Groq error: {e}")
                 return None
-    log.error("All retries exhausted.")
     return None
 
-# ─────────────────────────────────────────────────────────────
-# VALIDATION
-# ─────────────────────────────────────────────────────────────
-VALID_MODULES = {"Math", "Reading_Writing"}
-VALID_DOMAINS = {
-    "Algebra", "Advanced Math", "Problem-solving and Data Analysis", "Geometry and Trigonometry",
-    "Craft and Structure", "Information and Ideas", "Standard English Conventions", "Expression of Ideas",
-}
-VALID_DIFFS = {"Easy", "Medium", "Hard"}
 
-def is_valid_text(txt: str) -> bool:
-    """Detects if the text looks like raw JSON, code, or metadata."""
-    if not txt: return False
-    # Heuristics for JSON/Code leakage
-    if txt.strip().startswith("{") or txt.strip().startswith("["): return False
-    if "{" in txt and "}" in txt and ":" in txt: return False # Potential object snippet
-    if "http://" in txt or "https://" in txt: return False # No URLs in SAT questions
-    if "api." in txt or ".org" in txt: return False # Metadata leakage
-    return True
-
-def validate(data: dict, exp_module: str, exp_domain: str, exp_diff: str, exp_spr: bool) -> Optional[dict]:
-    if not isinstance(data, dict): return None
-    # Hard validation of text quality
-    q_text = data.get("question_text", "")
-    if not is_valid_text(q_text):
-        log.warning("Detected JSON/Code leakage in question_text — rejecting row.")
+# ─────────────────────────────────────────────────────────────
+# VALIDATION — strict, schema-correct
+# ─────────────────────────────────────────────────────────────
+def validate_and_build_payload(data: dict, exp_domain: str, exp_difficulty: str) -> Optional[dict]:
+    if not isinstance(data, dict):
         return None
 
-    # Pin to expected values if Groq drifts
-    data["module"]     = data.get("module")     if data.get("module")     in VALID_MODULES else exp_module
-    data["domain"]     = data.get("domain")     if data.get("domain")     in VALID_DOMAINS else exp_domain
-    data["difficulty"] = data.get("difficulty") if data.get("difficulty") in VALID_DIFFS   else exp_diff
-    
-    if not q_text or not data.get("correct_answer"): return None
-    
-    is_spr = bool(data.get("is_spr", exp_spr))
-    data["is_spr"] = is_spr
-    if is_spr:
-        data["options"] = None
-    else:
-        opts = data.get("options")
-        if not isinstance(opts, list) or len(opts) != 4:
-            log.warning("Options malformed — skipping.")
+    q_text = (data.get("question_text") or "").strip()
+    if not q_text:
+        log.warning("Empty question_text — rejecting")
+        return None
+
+    bad_signals = ["{", "http://", "https://", "api.", "status:", "message-type"]
+    if any(s in q_text for s in bad_signals) or q_text.startswith("["):
+        log.warning(f"JSON/code leakage detected — rejecting: {q_text[:80]}")
+        return None
+
+    domain = data.get("domain", exp_domain)
+    if domain not in VALID_DOMAINS:
+        domain = exp_domain
+
+    difficulty = data.get("difficulty", exp_difficulty)
+    if difficulty not in VALID_DIFFICULTIES:
+        difficulty = exp_difficulty
+
+    module = DOMAIN_TO_MODULE.get(domain)
+    if not module:
+        log.warning(f"Cannot determine module for domain: {domain}")
+        return None
+
+    options = data.get("options")
+    if not isinstance(options, list) or len(options) != 4:
+        log.warning("Options malformed — rejecting")
+        return None
+
+    correct_answer = (data.get("correct_answer") or "").strip()
+    if not correct_answer:
+        log.warning("Missing correct_answer — rejecting")
+        return None
+
+    if correct_answer not in options:
+        letter_map = {chr(65 + i): options[i] for i in range(4)}
+        if correct_answer.upper() in letter_map:
+            correct_answer = letter_map[correct_answer.upper()]
+        else:
+            log.warning(f"correct_answer '{correct_answer}' not in options — rejecting")
             return None
-    data["source_method"] = "Automated_Pipeline"
-    data.pop("id", None)
-    return data
+
+    rationale = (data.get("rationale") or "").strip()
+    if not rationale:
+        rationale = f"The correct answer is '{correct_answer}'."
+
+    raw = (data.get("raw_original_text") or data.get("_seed") or "").strip()
+
+    # Build payload using ALL required sat_question_bank columns
+    return {
+        "module": module,
+        "domain": domain,
+        "difficulty": difficulty,
+        "question_text": q_text,
+        "options": options,
+        "correct_answer": correct_answer,
+        "rationale": rationale,
+        "is_spr": False,
+        "source_method": "Automated_Pipeline",
+        "raw_original_text": raw if raw else None,
+    }
+
 
 # ─────────────────────────────────────────────────────────────
-# MAIN EXECUTION CORE
+# MAIN
 # ─────────────────────────────────────────────────────────────
 def main():
-    print("--- STARTING HARVESTER RUN ---")
-    
-    # 1. DYNAMIC PAGINATION
-    seed = random.randint(1, 1000)
-    target_url = random.choice(EXTERNAL_SOURCES) + str(seed)
-    print(f"Targeting URL: {target_url}")
-
+    log.info("=== SCRAPER RUN START ===")
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
     groq_client = Groq(api_key=GROQ_API_KEY)
 
-    queue = build_target_queue(supabase)
-    log.info(f"Processing {len(queue)} questions based on current inventory deficits…")
-
+    queue = build_queue(supabase)
     inserted = 0
-    skipped  = 0
+    skipped = 0
 
-    # Fetch raw source snippet
-    import urllib.request
-    try:
-        req = urllib.request.Request(target_url, headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req, timeout=10) as response:
-            raw_html = response.read()[:3000].decode("utf-8", errors="ignore")
-    except Exception as e:
-        log.warning(f"Could not scrape target URL: {e}. Passing empty raw text.")
-        raw_html = "(Simulated random conceptual math or reading text due to network block)"
+    for i, (domain, difficulty) in enumerate(queue):
+        log.info(f"[{i+1}/{len(queue)}] Generating {domain} | {difficulty}…")
 
-    for i, (module, domain, difficulty, is_spr) in enumerate(queue):
-        # Generate question using the LLM Entity Swap
-        data = generate_question(groq_client, module, domain, difficulty, is_spr, seed + i, raw_html)
-        validated = validate(data, module, domain, difficulty, is_spr) if data else None
-
-        if validated:
-            validated['raw_original_text'] = raw_html
-            q_text = validated['question_text']
-            # 2. DUPLICATE AVOIDANCE
-            try:
-                # Check if exact question already exists to avoid throwing raw database constraints
-                existing = supabase.table("sat_question_bank").select("id").eq("question_text", q_text).limit(1).execute()
-                if existing.data and len(existing.data) > 0:
-                    skipped += 1
-                    continue
-                
-                # Insert the deduplicated payload
-                supabase.table("sat_question_bank").insert(validated).execute()
-                print(f"Successfully Synthesized: {domain} | {difficulty}")
-                inserted += 1
-            except Exception as e:
-                log.error(f"  ✗ Insert failed: {e}")
-                skipped += 1
-        else:
+        data = generate_question(groq_client, domain, difficulty)
+        if not data:
             skipped += 1
+            continue
 
-        time.sleep(random.uniform(2.0, 3.5))
-
-    print(f"RUN COMPLETE. Successfully injected {inserted} new questions into Supabase. Skipped {skipped} duplicates.")
-
-    # ── AUTO-REPAIR SWEEP ────────────────────────────────────
-    # After every harvest run, scan the entire DB for rows with
-    # broken domain tags or missing raw_original_text and fix them.
-    auto_repair_untagged(supabase, groq_client)
-
-
-# ─────────────────────────────────────────────────────────────
-# AUTO-REPAIR: Fix rows with invalid tags or missing raw text
-# ─────────────────────────────────────────────────────────────
-def auto_repair_untagged(supabase: Client, groq_client: Groq):
-    """
-    Automatically called at the end of every scraper run.
-    Finds questions whose domain is NOT in the strict Enum list
-    and re-classifies them via Groq.
-    """
-    print("--- AUTO-REPAIR SWEEP STARTING ---")
-
-    # Fetch ALL rows — we'll filter client-side for broken tags
-    try:
-        response = supabase.table("sat_question_bank") \
-            .select("id, module, domain, difficulty, question_text, raw_original_text") \
-            .limit(1000) \
-            .execute()
-        rows = response.data or []
-    except Exception as e:
-        log.error(f"Auto-repair: could not fetch rows: {e}")
-        return
-
-    broken = [r for r in rows if r.get("domain") not in VALID_DOMAINS or r.get("module") not in VALID_MODULES]
-
-    if not broken:
-        print("Auto-repair: All rows have valid tags. Nothing to fix.")
-        return
-
-    # Cap at 20 repairs per run to stay within the 10-min GitHub Actions timeout.
-    # Over successive 15-min cron runs, all broken rows will eventually be fixed.
-    REPAIR_BATCH_SIZE = 10
-    batch = broken[:REPAIR_BATCH_SIZE]
-    print(f"Auto-repair: Found {len(broken)} rows with invalid tags. Repairing batch of {len(batch)}…")
-
-    repaired = 0
-    failed = 0
-
-    for row in batch:
-        rid = row["id"]
-        qtext = row.get("question_text", "")
-
-        repair_prompt = f"""You are a strict database evaluation engine.
-Below is a SAT question. Categorize it using EXACTLY these Allowed Enums.
-DO NOT make up your own tags. Pick the single best match.
-
-ALLOWED MODULES: "Math", "Reading_Writing"
-ALLOWED DOMAINS:
-  For Math: "Algebra", "Advanced Math", "Problem-solving and Data Analysis", "Geometry and Trigonometry"
-  For Reading_Writing: "Craft and Structure", "Information and Ideas", "Standard English Conventions", "Expression of Ideas"
-ALLOWED DIFFICULTIES: "Easy", "Medium", "Hard"
-
-QUESTION TEXT:
-{qtext}
-
-Respond in plain JSON only (no markdown):
-{{"module": "<module>", "domain": "<domain>", "difficulty": "<difficulty>"}}"""
+        payload = validate_and_build_payload(data, domain, difficulty)
+        if not payload:
+            skipped += 1
+            continue
 
         try:
-            resp = groq_client.chat.completions.create(
-                model=MODEL,
-                messages=[{"role": "user", "content": repair_prompt}],
-                temperature=0.1,
-                response_format={"type": "json_object"}
-            )
-            tags = json.loads(resp.choices[0].message.content.strip())
-            m = tags.get("module")
-            d = tags.get("domain")
-            df = tags.get("difficulty")
+            existing = supabase.table("sat_question_bank") \
+                .select("id") \
+                .eq("question_text", payload["question_text"]) \
+                .limit(1).execute()
+            if existing.data:
+                log.info("  Duplicate skipped.")
+                skipped += 1
+                continue
 
-            if m in VALID_MODULES and d in VALID_DOMAINS and df in VALID_DIFFS:
-                update = {"module": m, "domain": d, "difficulty": df}
-                # Also backfill raw_original_text if it's missing
-                if not row.get("raw_original_text"):
-                    update["raw_original_text"] = f"[Auto-backfilled] Original question text before entity swap was not captured for this legacy row."
-                supabase.table("sat_question_bank").update(update).eq("id", rid).execute()
-                print(f"  ✓ Repaired ID {rid}: {m} | {d} | {df}")
-                repaired += 1
-            else:
-                log.warning(f"  ✗ Groq returned invalid tags for ID {rid}: {m} | {d} | {df}")
-                failed += 1
+            supabase.table("sat_question_bank").insert(payload).execute()
+            log.info(f"  ✓ Inserted: {domain} | {difficulty}")
+            inserted += 1
         except Exception as e:
-            log.error(f"  ✗ Repair failed for ID {rid}: {e}")
-            failed += 1
+            log.error(f"  ✗ Insert failed: {e}")
+            skipped += 1
 
-        time.sleep(1.5)  # Rate limit buffer
+        time.sleep(random.uniform(2.0, 3.0))
 
-    print(f"--- AUTO-REPAIR COMPLETE: Fixed {repaired}, Failed {failed} ---")
+    log.info(f"=== RUN COMPLETE: {inserted} inserted, {skipped} skipped ===")
 
 
 if __name__ == "__main__":

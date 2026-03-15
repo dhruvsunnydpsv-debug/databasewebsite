@@ -3,11 +3,13 @@ import Link from 'next/link';
 
 interface AuditRow {
     id: string;
+    module: string;
     domain: string;
     difficulty: string;
     question_text: string;
     options: string[] | null;
     correct_answer: string;
+    rationale: string | null;
     raw_original_text: string | null;
     created_at: string;
 }
@@ -21,7 +23,7 @@ export default async function AdminAuditPage() {
 
     const { data, error } = await supabase
         .from('sat_question_bank')
-        .select('id, domain, difficulty, question_text, options, correct_answer, raw_original_text, created_at')
+        .select('id, module, domain, difficulty, question_text, options, correct_answer, rationale, raw_original_text, created_at')
         .not('raw_original_text', 'is', null)
         .order('created_at', { ascending: false })
         .limit(100);

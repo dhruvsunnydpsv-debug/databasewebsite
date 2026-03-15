@@ -5,8 +5,9 @@ import { calculateModuleWeightedScore, calculateSectionScaledScore } from '@/lib
 
 type Module = 'RW_M1' | 'RW_M2_Easy' | 'RW_M2_Hard' | 'MATH_M1' | 'MATH_M2_Easy' | 'MATH_M2_Hard' | 'COMPLETE';
 
-const RW_DOMAINS = ['Information_Ideas', 'Craft_Structure', 'Expression_Ideas', 'Standard_English'];
-const MATH_DOMAINS = ['Heart_of_Algebra', 'Advanced_Math', 'Problem_Solving_Data', 'Geometry_Trigonometry'];
+// Domain values must match actual sat_question_bank CHECK constraint (space format)
+const RW_DOMAINS = ['Information and Ideas', 'Craft and Structure', 'Expression of Ideas', 'Standard English Conventions'];
+const MATH_DOMAINS = ['Algebra', 'Advanced Math', 'Problem-solving and Data Analysis', 'Geometry and Trigonometry'];
 
 export default function AdaptiveBluebookSession() {
     const [questions, setQuestions] = useState<any[]>([]);
