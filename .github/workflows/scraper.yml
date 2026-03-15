@@ -22,22 +22,18 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
           python-version: '3.11'
-          cache: 'pip'
 
       - name: Install Python dependencies
-        run: |
-          pip install --upgrade pip
-          pip install supabase groq
+        run: pip install supabase groq requests beautifulsoup4
 
       - name: Run SAT Scraper
         env:
-          NEXT_PUBLIC_SUPABASE_URL:      ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY:     ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
-          GROQ_API_KEY:                  ${{ secrets.GROQ_API_KEY }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: |
           cd databasewebsite
           python scraper.py
