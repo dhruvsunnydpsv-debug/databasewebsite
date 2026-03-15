@@ -7,22 +7,44 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const supabase = createClient(supabaseUrl, supabaseKey);
 
+// Domain values MUST match sat_question_bank.domain exactly (underscore format)
 const SYSTEM_PROMPT = `You are an elite Digital SAT content creator (2026 Syllabus).
-TASK: Convert the provided RAW text into a high-fidelity SAT question.
+TASK: Apply the Entity Swap technique to the provided RAW text. Keep the core logic/math/structure identical, but swap out names, locations, and surface-level entities.
 
-JSON Schema:
+Return ONLY valid JSON matching this exact schema. No extra fields, no markdown, no explanation.
+
 {
-  "module": "Reading_Writing OR Math",
-  "domain": "One of: Algebra, Advanced Math, Problem-solving and Data Analysis, Geometry and Trigonometry, Craft and Structure, Information and Ideas, Standard English Conventions, Expression of Ideas",
-  "sub_domain": "Specific skill name (e.g., 'Words in Context')",
-  "difficulty": "Easy, Medium, Hard",
-  "question_text": "Sophisticated text. For RW, must be a 3-5 sentence passage. NO raw JSON or code.",
-  "is_spr": false,
-  "options": ["Choice A", "Choice B", "Choice C", "Choice D"],
-  "correct_answer": "Exact correct choice text",
-  "rationale": "One sentence explanation",
-  "module": "Math or Reading_Writing"
+  "domain": "MUST be exactly one of: Information_Ideas | Craft_Structure | Expression_Ideas | Standard_English | Heart_of_Algebra | Advanced_Math | Problem_Solving_Data | Geometry_Trigonometry",
+  "difficulty": "Easy | Medium | Hard",
+  "question_text": "The synthesized question text. No JSON, no code, no URLs.",
+  "options": ["Option text A", "Option text B", "Option text C", "Option text D"],
+  "correct_answer": "Exact text of the correct option (must match one of the options strings exactly)"
 }`;
+
+// Map AI output domain to valid DB domain in case AI still returns wrong format
+const DOMAIN_NORMALIZER: Record<string, string> = {
+    'Information_Ideas': 'Information_Ideas',
+    'Information and Ideas': 'Information_Ideas',
+    'Craft_Structure': 'Craft_Structure',
+    'Craft and Structure': 'Craft_Structure',
+    'Expression_Ideas': 'Expression_Ideas',
+    'Expression of Ideas': 'Expression_Ideas',
+    'Standard_English': 'Standard_English',
+    'Standard English Conventions': 'Standard_English',
+    'Heart_of_Algebra': 'Heart_of_Algebra',
+    'Algebra': 'Heart_of_Algebra',
+    'Heart of Algebra': 'Heart_of_Algebra',
+    'Advanced_Math': 'Advanced_Math',
+    'Advanced Math': 'Advanced_Math',
+    'Problem_Solving_Data': 'Problem_Solving_Data',
+    'Problem-solving and Data Analysis': 'Problem_Solving_Data',
+    'Problem Solving and Data Analysis': 'Problem_Solving_Data',
+    'Geometry_Trigonometry': 'Geometry_Trigonometry',
+    'Geometry and Trigonometry': 'Geometry_Trigonometry',
+};
+
+const VALID_DOMAINS = new Set(Object.values(DOMAIN_NORMALIZER));
+const VALID_DIFFICULTIES = new Set(['Easy', 'Medium', 'Hard']);
 
 export async function POST(req: Request) {
     try {
@@ -33,13 +55,13 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: 'No file provided' }, { status: 400 });
         }
 
-        const text = await file.text();
+        const rawFileText = await file.text();
 
-        // Simple heuristic to split questions: assume each non-empty line or block separated by double newlines is a question.
-        const rawQuestions = text.split(/\n\s*\n/).map(q => q.trim()).filter(q => q.length > 10);
+        // Split on double newlines — each block is one source question
+        const rawQuestions = rawFileText.split(/\n\s*\n/).map(q => q.trim()).filter(q => q.length > 10);
 
         if (rawQuestions.length === 0) {
-            return NextResponse.json({ error: 'No valid questions found in file' }, { status: 400 });
+            return NextResponse.json({ error: 'No valid question blocks found in file' }, { status: 400 });
         }
 
         const results = [];
@@ -50,55 +72,86 @@ export async function POST(req: Request) {
                     model: "llama-3.3-70b-versatile",
                     messages: [
                         { role: "system", content: SYSTEM_PROMPT },
-                        { role: "user", content: `Raw Question: "${raw_q}"` }
+                        { role: "user", content: `Raw source material:\n\n${raw_q}` }
                     ],
-                    temperature: 0.5,
+                    temperature: 0.4,
                     response_format: { type: "json_object" }
                 });
 
                 const rawResponse = completion.choices[0]?.message?.content;
                 if (!rawResponse) continue;
 
-                const parsed = JSON.parse(rawResponse);
-
-                // Sanity Check: Reject if question_text looks like JSON/Code
-                const qText = parsed.question_text || "";
-                const looksLikeJson = qText.trim().startsWith('{') || qText.trim().startsWith('[') || (qText.includes('{') && qText.includes(':'));
-                const hasMetadata = qText.includes('api.') || qText.includes('.org') || qText.includes('http');
-                
-                if (looksLikeJson || hasMetadata) {
-                    console.error("Inbound question rejected: Detected JSON/Metadata leakage.");
-                    return NextResponse.json({ error: "Validation failed: Inbound content contains code snippets or metadata." }, { status: 400 });
+                let parsed: any;
+                try {
+                    parsed = JSON.parse(rawResponse);
+                } catch {
+                    console.error("JSON parse failed for response:", rawResponse);
+                    continue;
                 }
 
+                const qText: string = (parsed.question_text || "").trim();
+
+                // Reject if question_text is empty or looks like leaked JSON/code
+                if (!qText || qText.startsWith('{') || qText.startsWith('[') || qText.includes('http')) {
+                    console.error("Rejected: question_text looks like JSON or metadata:", qText.slice(0, 100));
+                    continue;
+                }
+
+                // Normalize domain to DB-valid underscore format
+                const normalizedDomain: string = DOMAIN_NORMALIZER[parsed.domain] || "";
+                if (!VALID_DOMAINS.has(normalizedDomain)) {
+                    console.error("Rejected: unknown domain value:", parsed.domain);
+                    continue;
+                }
+
+                // Normalize difficulty
+                const difficulty: string = parsed.difficulty || "Medium";
+                if (!VALID_DIFFICULTIES.has(difficulty)) {
+                    console.error("Rejected: unknown difficulty value:", difficulty);
+                    continue;
+                }
+
+                // Validate options array
+                if (!Array.isArray(parsed.options) || parsed.options.length !== 4) {
+                    console.error("Rejected: options must be array of 4 strings");
+                    continue;
+                }
+
+                // Validate correct_answer matches one of the options
+                const correctAnswer: string = (parsed.correct_answer || "").trim();
+                if (!parsed.options.includes(correctAnswer)) {
+                    console.error("Rejected: correct_answer does not match any option:", correctAnswer);
+                    continue;
+                }
+
+                // Build payload using ONLY columns that exist in sat_question_bank
                 const dbPayload = {
-                    module: parsed.module || "Math",
-                    domain: parsed.domain,
-                    sub_domain: parsed.sub_domain,
-                    difficulty: parsed.difficulty,
+                    domain: normalizedDomain,
+                    difficulty,
                     question_text: qText,
-                    is_spr: !!parsed.is_spr,
                     options: parsed.options,
-                    correct_answer: parsed.correct_answer,
-                    rationale: parsed.rationale,
-                    raw_original_text: text.slice(0, 1000),
-                    source_method: "Admin_Dropzone"
+                    correct_answer: correctAnswer,
+                    raw_original_text: raw_q,
                 };
 
                 const { data: insertedData, error: dbError } = await supabase
                     .from('sat_question_bank')
                     .insert(dbPayload)
-                    .select()
+                    .select('id, domain, difficulty, question_text, options, correct_answer')
                     .single();
 
                 if (dbError) {
-                    console.error("Supabase Insertion Error:", dbError);
+                    console.error("Supabase Insertion Error:", dbError.message, "Payload:", JSON.stringify(dbPayload));
                 } else {
                     results.push(insertedData);
                 }
             } catch (err: any) {
-                console.error("Error processing question:", err);
+                console.error("Error processing question block:", err.message);
             }
+        }
+
+        if (results.length === 0) {
+            return NextResponse.json({ error: 'No questions were successfully processed. Check server logs.' }, { status: 422 });
         }
 
         return NextResponse.json({ success: true, count: results.length, data: results });

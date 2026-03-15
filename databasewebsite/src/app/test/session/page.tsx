@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
+import { calculateModuleWeightedScore, calculateSectionScaledScore } from '@/lib/scoring-logic';
 
 type Module = 'RW_M1' | 'RW_M2_Easy' | 'RW_M2_Hard' | 'MATH_M1' | 'MATH_M2_Easy' | 'MATH_M2_Hard' | 'COMPLETE';
 
@@ -14,6 +15,10 @@ export default function AdaptiveBluebookSession() {
     const [userAnswers, setUserAnswers] = useState<Record<number, string>>({});
     const [currentModule, setCurrentModule] = useState<Module>('RW_M1');
     const [finalScores, setFinalScores] = useState<{ rw: number; math: number } | null>(null);
+    const [rwM1Score, setRwM1Score] = useState(0);
+    const [rwIsHigherPath, setRwIsHigherPath] = useState(false);
+    const [mathM1Score, setMathM1Score] = useState(0);
+    const [mathIsHigherPath, setMathIsHigherPath] = useState(false);
 
     useEffect(() => {
         if (currentModule === 'COMPLETE') return;
@@ -95,25 +100,28 @@ export default function AdaptiveBluebookSession() {
         setUserAnswers(prev => ({ ...prev, [currentIndex]: answer }));
     };
 
-    const gradeModule = () => {
-        let correct = 0;
-        questions.forEach((q, idx) => {
-            if (userAnswers[idx] === q.correct_answer) correct++;
-        });
-        return correct;
-    };
-
     const submitModule = () => {
-        const score = gradeModule();
+        const weighted = calculateModuleWeightedScore(questions, userAnswers, {}, questions.length);
 
         if (currentModule === 'RW_M1') {
-            setCurrentModule(score >= 15 ? 'RW_M2_Hard' : 'RW_M2_Easy');
+            const simpleCount = questions.filter((q, i) => userAnswers[i] === q.correct_answer).length;
+            const higherPath = simpleCount >= 15;
+            setRwM1Score(weighted);
+            setRwIsHigherPath(higherPath);
+            setCurrentModule(higherPath ? 'RW_M2_Hard' : 'RW_M2_Easy');
         } else if (currentModule === 'RW_M2_Easy' || currentModule === 'RW_M2_Hard') {
+            const rwScaled = calculateSectionScaledScore(rwM1Score, weighted, rwIsHigherPath);
+            setFinalScores(prev => ({ rw: rwScaled, math: prev?.math ?? 0 }));
             setCurrentModule('MATH_M1');
         } else if (currentModule === 'MATH_M1') {
-            setCurrentModule(score >= 12 ? 'MATH_M2_Hard' : 'MATH_M2_Easy');
+            const simpleCount = questions.filter((q, i) => userAnswers[i] === q.correct_answer).length;
+            const higherPath = simpleCount >= 12;
+            setMathM1Score(weighted);
+            setMathIsHigherPath(higherPath);
+            setCurrentModule(higherPath ? 'MATH_M2_Hard' : 'MATH_M2_Easy');
         } else if (currentModule === 'MATH_M2_Easy' || currentModule === 'MATH_M2_Hard') {
-            setFinalScores(prev => ({ rw: prev?.rw ?? 0, math: score }));
+            const mathScaled = calculateSectionScaledScore(mathM1Score, weighted, mathIsHigherPath);
+            setFinalScores(prev => ({ rw: prev?.rw ?? 0, math: mathScaled }));
             setCurrentModule('COMPLETE');
         }
     };
@@ -124,18 +132,26 @@ export default function AdaptiveBluebookSession() {
             <div className="h-screen w-screen flex flex-col items-center justify-center bg-[#F3F4F6] text-black gap-6">
                 <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-12 flex flex-col items-center gap-4 max-w-md w-full">
                     <h1 className="text-3xl font-bold text-[#242b35]">Test Complete</h1>
-                    <p className="text-gray-500 text-sm">Full Adaptive SAT Finished</p>
+                    <p className="text-gray-500 text-sm">Full Adaptive Digital SAT</p>
                     <div className="w-full border-t border-gray-200 my-2" />
                     <div className="flex justify-around w-full">
                         <div className="flex flex-col items-center gap-1">
-                            <span className="text-4xl font-black text-[#004de6]">{finalScores?.rw ?? '—'}</span>
+                            <span className="text-5xl font-black text-[#004de6]">{finalScores?.rw ?? '—'}</span>
                             <span className="text-xs font-bold uppercase tracking-widest text-gray-400">Reading &amp; Writing</span>
+                            <span className="text-[10px] text-gray-300">/ 800</span>
                         </div>
-                        <div className="flex flex-col items-center gap-1">
-                            <span className="text-4xl font-black text-[#004de6]">{finalScores?.math ?? '—'}</span>
+                        <div className="flex flex-col items-center gap-1 border-l border-gray-100 pl-8 ml-4">
+                            <span className="text-5xl font-black text-[#004de6]">{finalScores?.math ?? '—'}</span>
                             <span className="text-xs font-bold uppercase tracking-widest text-gray-400">Math</span>
+                            <span className="text-[10px] text-gray-300">/ 800</span>
                         </div>
                     </div>
+                    {finalScores && (
+                        <div className="w-full bg-[#f0f5ff] rounded-xl p-4 text-center border border-[#004de6]/20">
+                            <span className="text-2xl font-black text-[#004de6]">{finalScores.rw + finalScores.math}</span>
+                            <span className="text-xs font-bold uppercase tracking-widest text-gray-400 block mt-1">Composite Score / 1600</span>
+                        </div>
+                    )}
                     <button
                         onClick={() => { setCurrentModule('RW_M1'); setFinalScores(null); }}
                         className="mt-4 px-8 py-3 bg-[#004de6] text-white font-bold rounded-full hover:bg-blue-800 transition-colors"

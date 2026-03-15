@@ -3,10 +3,8 @@ import Link from 'next/link';
 
 interface AuditRow {
     id: string;
-    module: string;
     domain: string;
     difficulty: string;
-    source_method: string;
     question_text: string;
     options: string[] | null;
     correct_answer: string;
@@ -23,16 +21,12 @@ export default async function AdminAuditPage() {
 
     const { data, error } = await supabase
         .from('sat_question_bank')
-        .select('id, module, domain, difficulty, source_method, question_text, options, correct_answer, raw_original_text, created_at')
+        .select('id, domain, difficulty, question_text, options, correct_answer, raw_original_text, created_at')
+        .not('raw_original_text', 'is', null)
         .order('created_at', { ascending: false })
         .limit(100);
 
     const rows: AuditRow[] = data || [];
-
-    const tagColor = (source: string) =>
-        source === 'Admin_Dropzone'
-            ? { bg: '#E6D5F8', border: '#7C4DFF' }
-            : { bg: '#D5F0E6', border: '#2ECC71' };
 
     return (
         <div style={{ maxWidth: '960px', margin: '0 auto', padding: '3rem 1.5rem', fontFamily: "'Inter', sans-serif" }}>
@@ -100,7 +94,6 @@ export default async function AdminAuditPage() {
 
             {/* ── Comparison Cards ─────────────────────────────── */}
             {rows.map((row) => {
-                const sc = tagColor(row.source_method || 'Automated_Pipeline');
                 return (
                     <div key={row.id} style={{
                         border: '1px solid #D0D0C8', borderRadius: '12px',
@@ -114,13 +107,6 @@ export default async function AdminAuditPage() {
                             borderBottom: '1px solid #D0D0C8',
                             backgroundColor: '#F5F5ED',
                         }}>
-                            <span style={{
-                                backgroundColor: sc.bg, border: `1px solid ${sc.border}`,
-                                borderRadius: '9999px', padding: '0.1rem 0.6rem',
-                                fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase',
-                            }}>
-                                {row.source_method === 'Admin_Dropzone' ? 'Manual' : 'Automated'}
-                            </span>
                             <span style={{
                                 backgroundColor: '#E8E8E0', borderRadius: '9999px',
                                 padding: '0.1rem 0.6rem', fontSize: '0.6rem', fontWeight: 600,
