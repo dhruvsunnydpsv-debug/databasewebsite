@@ -1,17 +1,20 @@
 """
-scraper.py — SAT Question Generator v5 (Groq-powered, schema-correct)
-=============================================================================
-Runs every 15 min via GitHub Actions.
-Generates self-contained, Bluebook-style SAT questions using Groq's Llama 3.3.
-NO external URL scraping. NO JSON garbage. Only real question patterns.
+scraper.py — SAT Real-Source Scraper v6
+========================================
+Fetches REAL SAT questions from cracksat.net (public practice tests),
+applies Groq Entity Swap to change names/numbers/entities while keeping
+all math logic and reasoning structure identical, then inserts into DB.
 
-Schema columns used (MUST match sat_question_bank CHECK constraints):
-  module        : 'Math' | 'Reading_Writing'
-  domain        : space-format (e.g. 'Information and Ideas', 'Algebra')
-  difficulty    : 'Easy' | 'Medium' | 'Hard'
-  is_spr        : False (always for generated MCQ)
-  source_method : 'Automated_Pipeline'
-  rationale     : required NOT NULL explanation
+NO generated questions. Only real questions, entity-swapped.
+
+Flow per run:
+  1. Pick thin buckets from DB inventory
+  2. Fetch real SAT question page from cracksat.net
+  3. Submit form → get correct answer key from results.php
+  4. Pass raw text + answer key to Groq → parse into structured questions
+     AND apply entity swap in one step
+  5. Validate all required columns
+  6. Deduplicate + insert into Supabase
 """
 
 import os
@@ -19,13 +22,13 @@ import json
 import logging
 import random
 import time
+import re
 from typing import Optional
+import requests
+from bs4 import BeautifulSoup
 from supabase import create_client, Client
 from groq import Groq
 
-# ─────────────────────────────────────────────────────────────
-# CONFIG
-# ─────────────────────────────────────────────────────────────
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
@@ -33,395 +36,374 @@ SUPABASE_URL = os.environ["NEXT_PUBLIC_SUPABASE_URL"]
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ["NEXT_PUBLIC_SUPABASE_ANON_KEY"]
 GROQ_API_KEY = os.environ["GROQ_API_KEY"]
 
-QUESTIONS_PER_RUN = 20
 MODEL = "llama-3.3-70b-versatile"
+QUESTIONS_PER_RUN = 15
+TARGET_PER_BUCKET = 500
 
-# ── Valid domain values MUST match schema.sql CHECK constraint (space format) ──
-RW_DOMAINS = {
-    "Information and Ideas",
-    "Craft and Structure",
-    "Expression of Ideas",
-    "Standard English Conventions",
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.5",
 }
-MATH_DOMAINS = {
-    "Algebra",
-    "Advanced Math",
-    "Problem-solving and Data Analysis",
-    "Geometry and Trigonometry",
-}
+
+# ── Domain / Module mappings ────────────────────────────────────────────────
+RW_DOMAINS = {"Information and Ideas", "Craft and Structure", "Expression of Ideas", "Standard English Conventions"}
+MATH_DOMAINS = {"Algebra", "Advanced Math", "Problem-solving and Data Analysis", "Geometry and Trigonometry"}
 VALID_DOMAINS = RW_DOMAINS | MATH_DOMAINS
 VALID_DIFFICULTIES = {"Easy", "Medium", "Hard"}
-
-# Module mapping
 DOMAIN_TO_MODULE = {d: "Reading_Writing" for d in RW_DOMAINS}
 DOMAIN_TO_MODULE.update({d: "Math" for d in MATH_DOMAINS})
 
-# ── All buckets: (domain, difficulty) ──────────────────────────────────────────
 ALL_BUCKETS = [
-    # Reading & Writing
-    ("Information and Ideas",           "Easy"),   ("Information and Ideas",           "Medium"), ("Information and Ideas",           "Hard"),
-    ("Craft and Structure",              "Easy"),   ("Craft and Structure",              "Medium"), ("Craft and Structure",              "Hard"),
-    ("Expression of Ideas",             "Easy"),   ("Expression of Ideas",             "Medium"), ("Expression of Ideas",             "Hard"),
-    ("Standard English Conventions",    "Easy"),   ("Standard English Conventions",    "Medium"), ("Standard English Conventions",    "Hard"),
-    # Math
-    ("Algebra",                          "Easy"),   ("Algebra",                          "Medium"), ("Algebra",                          "Hard"),
-    ("Advanced Math",                    "Easy"),   ("Advanced Math",                    "Medium"), ("Advanced Math",                    "Hard"),
-    ("Problem-solving and Data Analysis","Easy"),   ("Problem-solving and Data Analysis","Medium"), ("Problem-solving and Data Analysis","Hard"),
-    ("Geometry and Trigonometry",        "Easy"),   ("Geometry and Trigonometry",        "Medium"), ("Geometry and Trigonometry",        "Hard"),
+    ("Information and Ideas", "Easy"), ("Information and Ideas", "Medium"), ("Information and Ideas", "Hard"),
+    ("Craft and Structure", "Easy"), ("Craft and Structure", "Medium"), ("Craft and Structure", "Hard"),
+    ("Expression of Ideas", "Easy"), ("Expression of Ideas", "Medium"), ("Expression of Ideas", "Hard"),
+    ("Standard English Conventions", "Easy"), ("Standard English Conventions", "Medium"), ("Standard English Conventions", "Hard"),
+    ("Algebra", "Easy"), ("Algebra", "Medium"), ("Algebra", "Hard"),
+    ("Advanced Math", "Easy"), ("Advanced Math", "Medium"), ("Advanced Math", "Hard"),
+    ("Problem-solving and Data Analysis", "Easy"), ("Problem-solving and Data Analysis", "Medium"), ("Problem-solving and Data Analysis", "Hard"),
+    ("Geometry and Trigonometry", "Easy"), ("Geometry and Trigonometry", "Medium"), ("Geometry and Trigonometry", "Hard"),
 ]
 
-TARGET_PER_BUCKET = 500
+# ── CrackSAT source pages: (url, subject_hint, difficulty_hint) ─────────────
+# These are real SAT practice tests from cracksat.net
+CRACKSAT_SOURCES = [
+    # Math Multiple Choice (verified working with form + answers)
+    ("https://www.cracksat.net/sat/math-multiple-choice/test-1.html", "Math", "Medium"),
+    ("https://www.cracksat.net/sat/math-multiple-choice/test-2.html", "Math", "Medium"),
+    ("https://www.cracksat.net/sat/math-multiple-choice/test-3.html", "Math", "Hard"),
+    ("https://www.cracksat.net/sat/math-multiple-choice/test-4.html", "Math", "Hard"),
+    ("https://www.cracksat.net/sat/math-multiple-choice/test-5.html", "Math", "Medium"),
+    ("https://www.cracksat.net/sat/math-multiple-choice/test-6.html", "Math", "Easy"),
+    ("https://www.cracksat.net/sat/math-multiple-choice/test-7.html", "Math", "Medium"),
+    ("https://www.cracksat.net/sat/math-multiple-choice/test-8.html", "Math", "Hard"),
+    ("https://www.cracksat.net/sat/math-multiple-choice/test-9.html", "Math", "Medium"),
+    ("https://www.cracksat.net/sat/math-multiple-choice/test-10.html", "Math", "Hard"),
+    ("https://www.cracksat.net/sat/math-multiple-choice/test-11.html", "Math", "Easy"),
+    ("https://www.cracksat.net/sat/math-multiple-choice/test-12.html", "Math", "Medium"),
+    ("https://www.cracksat.net/sat/math-multiple-choice/test-13.html", "Math", "Hard"),
+    ("https://www.cracksat.net/sat/math-multiple-choice/test-14.html", "Math", "Medium"),
+    ("https://www.cracksat.net/sat/math-multiple-choice/test-15.html", "Math", "Easy"),
+    # Grammar / Writing (verified working: /sat/grammar/ path)
+    ("https://www.cracksat.net/sat/grammar/test-1.html", "Writing", "Medium"),
+    ("https://www.cracksat.net/sat/grammar/test-2.html", "Writing", "Medium"),
+    ("https://www.cracksat.net/sat/grammar/test-3.html", "Writing", "Hard"),
+    ("https://www.cracksat.net/sat/grammar/test-4.html", "Writing", "Easy"),
+    ("https://www.cracksat.net/sat/grammar/test-5.html", "Writing", "Medium"),
+    ("https://www.cracksat.net/sat/grammar/test-6.html", "Writing", "Hard"),
+    ("https://www.cracksat.net/sat/grammar/test-7.html", "Writing", "Medium"),
+    ("https://www.cracksat.net/sat/grammar/test-8.html", "Writing", "Easy"),
+    ("https://www.cracksat.net/sat/grammar/test-9.html", "Writing", "Medium"),
+    ("https://www.cracksat.net/sat/grammar/test-10.html", "Writing", "Hard"),
+]
 
-# ── Rich sub-domain prompts for each domain ────────────────────────────────────
-SUBDOMAINS = {
-    "Information and Ideas": [
-        "Central Ideas and Details — identify the main claim of a short passage",
-        "Command of Evidence (Textual) — select the quote that best supports a given claim",
-        "Command of Evidence (Quantitative) — interpret data from a table or graph to answer a question",
-        "Inferences — draw a logical conclusion from evidence provided in a passage",
-    ],
-    "Craft and Structure": [
-        "Words in Context — determine the most precise meaning of an underlined word in context",
-        "Text Structure and Purpose — identify why the author included a particular sentence or detail",
-        "Cross-Text Connections — compare the perspectives of two short passages on the same topic",
-    ],
-    "Expression of Ideas": [
-        "Rhetorical Synthesis — combine information from notes into one grammatically correct sentence",
-        "Transitions — select the most logical transition word or phrase to connect two sentences",
-    ],
-    "Standard English Conventions": [
-        "Sentence Boundaries — fix comma splices, run-ons, or fragments",
-        "Subject-Verb Agreement — correct agreement errors in complex sentence structures",
-        "Pronoun Reference — fix ambiguous or incorrect pronoun antecedents",
-        "Verb Tense and Form — select the correct tense for context",
-        "Punctuation — use commas, semicolons, colons, and dashes correctly",
-        "Parallel Structure — maintain parallel form across a list or comparison",
-    ],
-    "Algebra": [
-        "Linear equations in one variable — solve or interpret ax + b = c",
-        "Linear equations in two variables — write the equation of a line from context",
-        "Systems of two linear equations — solve by substitution or elimination",
-        "Linear inequalities in one or two variables — solve and interpret on a number line or graph",
-        "Linear functions — identify slope, y-intercept, and rate of change from a table or graph",
-    ],
-    "Advanced Math": [
-        "Equivalent expressions — factor, expand, or simplify polynomial and rational expressions",
-        "Nonlinear equations in one variable — solve quadratic equations by factoring or the quadratic formula",
-        "Nonlinear functions — analyze the graph of a parabola or exponential function",
-        "Systems of equations with one nonlinear equation — solve algebraically and interpret solutions",
-    ],
-    "Problem-solving and Data Analysis": [
-        "Ratios, rates, and proportional relationships — set up and solve a proportion from context",
-        "Percentages — calculate percent change, markups, or percent of a whole",
-        "One-variable data: distributions and measures of center — mean, median, range, IQR",
-        "Two-variable data: scatterplots and lines of best fit — interpret slope and y-intercept in context",
-        "Probability and conditional probability — calculate from a two-way frequency table",
-        "Statistical inference — evaluate claims based on sample data and margin of error",
-    ],
-    "Geometry and Trigonometry": [
-        "Area and volume — apply formulas for circles, triangles, rectangles, cylinders, and cones",
-        "Lines, angles, and triangles — use parallel line angle relationships and triangle sum theorem",
-        "Right triangles and trigonometry — apply SOH-CAH-TOA and the Pythagorean theorem",
-        "Circles — arc length, sector area, central and inscribed angle theorems",
-        "Coordinate geometry — distance formula, midpoint, and equation of a circle",
-    ],
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 1: FETCH QUESTIONS + ANSWERS FROM CRACKSAT
+# ─────────────────────────────────────────────────────────────────────────────
+def fetch_cracksat_page(url: str) -> tuple[str, dict]:
+    """
+    Returns (raw_question_text, correct_answer_map)
+    correct_answer_map: {"1": "A", "2": "D", ...}
+    """
+    r = requests.get(url, headers={**HEADERS, "Referer": url}, timeout=15)
+    r.raise_for_status()
+    soup = BeautifulSoup(r.text, "html.parser")
+
+    mc = soup.find("div", class_="mcontent")
+    if not mc:
+        raise ValueError(f"No mcontent found at {url}")
+
+    raw_text = mc.get_text(separator="\n")
+
+    # Get answer key by submitting the form
+    form = soup.find("form", action="/results.php")
+    if not form:
+        return raw_text, {}
+
+    hidden = {i.get("name"): i.get("value") for i in form.find_all("input", type="hidden") if i.get("name")}
+    radio_names = list(dict.fromkeys(
+        i.get("name") for i in form.find_all("input", type="radio") if i.get("name")
+    ))
+
+    post_data = {**hidden, **{q: "A" for q in radio_names}}
+    r2 = requests.post(
+        "https://www.cracksat.net/results.php",
+        data=post_data,
+        headers={**HEADERS, "Referer": url, "Content-Type": "application/x-www-form-urlencoded"},
+        timeout=15,
+    )
+    soup2 = BeautifulSoup(r2.text, "html.parser")
+    mc2 = soup2.find("div", class_="mcontent")
+
+    correct_map = {}
+    if mc2:
+        for row in mc2.find_all("tr")[1:]:  # skip header row
+            cols = [c.get_text(strip=True) for c in row.find_all("td")]
+            if len(cols) >= 2 and cols[0].isdigit():
+                correct_map[cols[0]] = cols[1]
+
+    log.info(f"  Fetched {len(correct_map)} answers from {url.split('/')[-1]}")
+    return raw_text, correct_map
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 2: GROQ — PARSE + ENTITY SWAP IN ONE CALL
+# ─────────────────────────────────────────────────────────────────────────────
+PARSE_AND_SWAP_PROMPT = """You are a Digital SAT question processor. You will receive:
+1. Raw text from a real SAT practice test
+2. The correct answer key (question number → letter A/B/C/D)
+
+Your job:
+A. Parse the raw text into individual questions (question text + 4 options + correct answer letter)
+B. Apply Entity Swap to each question:
+   - Keep ALL math logic, grammar rules, reasoning structure IDENTICAL
+   - Change: people's names, company names, place names, dollar amounts, specific numbers in word problems, product names
+   - Do NOT change: mathematical operations, grammar rules being tested, logical structure, variable names in equations
+
+Return a JSON array. Each element:
+{
+  "domain": "MUST be exactly one of: Information and Ideas | Craft and Structure | Expression of Ideas | Standard English Conventions | Algebra | Advanced Math | Problem-solving and Data Analysis | Geometry and Trigonometry",
+  "difficulty": "Easy | Medium | Hard",
+  "question_text": "The entity-swapped question stem (for reading questions, include the passage THEN a blank line THEN the question)",
+  "options": ["option A text", "option B text", "option C text", "option D text"],
+  "correct_answer": "exact text of correct option (must match one of the options strings exactly)",
+  "rationale": "one sentence explaining why the correct answer is correct",
+  "raw_original_text": "the original question text before entity swap (passage + stem for reading questions)"
 }
 
-RW_PASSAGE_SEEDS = [
-    "a 19th-century naturalist studying bird migration patterns in South America",
-    "a contemporary marine biologist researching deep-sea bioluminescence",
-    "an archaeologist analyzing pottery shards from an ancient Mediterranean civilization",
-    "a historian examining the economic impact of railroad expansion in 19th-century America",
-    "a literary critic discussing the narrative structure of Victorian novels",
-    "a sociologist studying community cohesion in post-industrial cities",
-    "an astronomer comparing the atmospheric composition of gas giant planets",
-    "a linguist documenting the evolution of creole languages in the Caribbean",
-    "a neuroscientist investigating the role of sleep in memory consolidation",
-    "a philosopher analyzing the ethical implications of artificial intelligence",
-    "an environmental economist quantifying the cost of coastal erosion",
-    "a botanist studying the mycorrhizal networks connecting trees in old-growth forests",
-]
-
-MATH_CONTEXT_SEEDS = [
-    "a car rental company's pricing model",
-    "a school fundraiser selling two types of items",
-    "the trajectory of a ball thrown from a rooftop",
-    "a company's quarterly profit growth",
-    "a swimming pool being filled and drained simultaneously",
-    "the relationship between study hours and test scores",
-    "a farmer dividing land into rectangular plots",
-    "the depreciation of a vehicle's value over time",
-    "a scientist diluting a chemical solution",
-    "a city's population growth modeled by an exponential function",
-    "the speed of two cyclists traveling toward each other",
-    "the dimensions of a triangular sail on a yacht",
-]
-
-
-# ─────────────────────────────────────────────────────────────
-# SELF-BALANCING QUEUE BUILDER
-# ─────────────────────────────────────────────────────────────
-def build_queue(supabase: Client) -> list:
-    log.info("Querying inventory for self-balancing analysis…")
-    existing: dict = {}
-    try:
-        rows = supabase.table("sat_question_bank").select("domain, difficulty").execute()
-        for r in rows.data:
-            key = (r["domain"], r["difficulty"])
-            existing[key] = existing.get(key, 0) + 1
-    except Exception as e:
-        log.warning(f"Could not read inventory: {e}")
-
-    scores = []
-    for bucket in ALL_BUCKETS:
-        actual = existing.get(bucket, 0)
-        deficit = max(0, TARGET_PER_BUCKET - actual) + 1
-        scores.append((bucket[0], bucket[1], deficit))
-        log.info(f"  {bucket[0]} | {bucket[1]} → {actual} (deficit {deficit})")
-
-    total_deficit = sum(s[2] for s in scores)
-    queue = []
-    for domain, difficulty, deficit in scores:
-        slots = max(1, round((deficit / total_deficit) * QUESTIONS_PER_RUN))
-        for _ in range(slots):
-            queue.append((domain, difficulty))
-
-    random.shuffle(queue)
-    queue = queue[:QUESTIONS_PER_RUN]
-    while len(queue) < QUESTIONS_PER_RUN:
-        queue.append(random.choice(queue))
-
-    log.info(f"Queue: {len(queue)} questions across {len(set(queue))} unique buckets.")
-    return queue
-
-
-# ─────────────────────────────────────────────────────────────
-# PROMPT BUILDER — pure pattern, no external scraping
-# ─────────────────────────────────────────────────────────────
-def build_prompt(domain: str, difficulty: str) -> tuple[str, str]:
-    sub = random.choice(SUBDOMAINS.get(domain, ["General"]))
-    is_math = domain in MATH_DOMAINS
-
-    if is_math:
-        seed = random.choice(MATH_CONTEXT_SEEDS)
-        passage_seed = f"Context: {seed}"
-        difficulty_guidance = {
-            "Easy":   "one or two steps, straightforward computation, no tricks",
-            "Medium": "multi-step, requires setting up an equation or interpreting a graph",
-            "Hard":   "complex multi-step, requires combining two concepts, abstract reasoning",
-        }[difficulty]
-
-        system = f"""You are a senior Digital SAT Math question writer for the 2026 exam.
-
-Write exactly ONE original SAT-style question with these specs:
-  Domain      : {domain}
-  Sub-domain  : {sub}
-  Difficulty  : {difficulty} ({difficulty_guidance})
-  Context seed: {seed}
-
 Rules:
-- The question must be self-contained. Include all numbers and context needed.
-- For Hard questions, involve at least two mathematical steps or a non-obvious setup.
-- Four answer choices. Exactly one is correct. Distractors must reflect common errors.
-- correct_answer must be the EXACT TEXT of the correct option.
-- rationale: one clear sentence explaining why the correct answer is correct.
-
-Return ONLY this JSON object. No markdown, no extra fields:
-{{
-  "domain": "{domain}",
-  "difficulty": "{difficulty}",
-  "question_text": "Full question stem with all numbers included.",
-  "options": ["option text A", "option text B", "option text C", "option text D"],
-  "correct_answer": "Exact text of the correct option",
-  "rationale": "One sentence explaining why the correct answer is correct."
-}}"""
-
-    else:
-        seed = random.choice(RW_PASSAGE_SEEDS)
-        passage_seed = f"Topic: {seed}"
-        difficulty_guidance = {
-            "Easy":   "short 2-sentence passage, direct inference, obvious answer",
-            "Medium": "3-4 sentence passage, requires understanding of author's purpose or word nuance",
-            "Hard":   "4-5 sentence passage with complex syntax, subtle distinction between answer choices",
-        }[difficulty]
-
-        system = f"""You are a senior Digital SAT Reading & Writing question writer for the 2026 exam.
-
-Write exactly ONE original SAT-style question with these specs:
-  Domain      : {domain}
-  Sub-domain  : {sub}
-  Difficulty  : {difficulty} ({difficulty_guidance})
-  Topic seed  : {seed}
-
-Rules:
-- Write an original passage appropriate to the difficulty. Use real academic/literary register.
-- The passage must NOT contain any JSON, code, URLs, or metadata.
-- question_text = the PASSAGE TEXT followed by a blank line then the question stem.
-- Four answer choices. Exactly one is correct. Wrong choices must be plausible but distinguishable.
-- correct_answer must be the EXACT TEXT of the correct option.
-- rationale: one clear sentence explaining why the correct answer is correct.
-- raw_original_text = the passage text ONLY (no question stem).
-
-Return ONLY this JSON object. No markdown, no extra fields:
-{{
-  "domain": "{domain}",
-  "difficulty": "{difficulty}",
-  "question_text": "PASSAGE TEXT\\n\\nQUESTION STEM",
-  "options": ["option text A", "option text B", "option text C", "option text D"],
-  "correct_answer": "Exact text of the correct option",
-  "rationale": "One sentence explaining why the correct answer is correct.",
-  "raw_original_text": "PASSAGE TEXT ONLY"
-}}"""
-
-    return system, passage_seed
+- Skip any question that relies on a diagram or image you cannot read
+- Skip questions with blank/missing option text
+- correct_answer must be exact text from the options array, NOT a letter
+- Return ONLY the JSON array. No markdown, no extra text."""
 
 
-# ─────────────────────────────────────────────────────────────
-# GENERATION
-# ─────────────────────────────────────────────────────────────
-def generate_question(client: Groq, domain: str, difficulty: str) -> Optional[dict]:
-    system_prompt, seed = build_prompt(domain, difficulty)
+def parse_and_swap(groq_client: Groq, raw_text: str, answer_map: dict, subject_hint: str, difficulty_hint: str) -> list[dict]:
+    answer_str = ", ".join(f"{k}:{v}" for k, v in sorted(answer_map.items(), key=lambda x: int(x[0]) if x[0].isdigit() else 999))
+    user_msg = (
+        f"Subject: {subject_hint} | Difficulty hint: {difficulty_hint}\n"
+        f"Correct answers: {answer_str}\n\n"
+        f"Raw test text:\n{raw_text[:3000]}"
+    )
+
     for attempt in range(3):
         try:
-            response = client.chat.completions.create(
+            resp = groq_client.chat.completions.create(
                 model=MODEL,
-                messages=[{"role": "user", "content": system_prompt}],
+                messages=[
+                    {"role": "system", "content": PARSE_AND_SWAP_PROMPT},
+                    {"role": "user", "content": user_msg},
+                ],
                 response_format={"type": "json_object"},
-                temperature=0.75,
-                max_tokens=1200,
+                temperature=0.3,
+                max_tokens=4000,
             )
-            raw = response.choices[0].message.content.strip()
+            raw = resp.choices[0].message.content.strip()
             data = json.loads(raw)
-            data["_seed"] = seed
-            return data
+            # Handle both {"questions": [...]} and [...] responses
+            if isinstance(data, dict):
+                questions = data.get("questions") or data.get("data") or list(data.values())[0]
+            else:
+                questions = data
+            if isinstance(questions, list):
+                return questions
         except json.JSONDecodeError as e:
-            log.error(f"JSON parse error (attempt {attempt+1}): {e}")
+            log.error(f"JSON parse error attempt {attempt+1}: {e}")
         except Exception as e:
             err = str(e)
             if "rate_limit" in err.lower() or "429" in err:
-                wait = 15 * (2 ** attempt)
-                log.warning(f"Rate limit. Waiting {wait}s…")
+                wait = 20 * (2 ** attempt)
+                log.warning(f"Rate limit, waiting {wait}s...")
                 time.sleep(wait)
             else:
                 log.error(f"Groq error: {e}")
-                return None
-    return None
+                return []
+    return []
 
 
-# ─────────────────────────────────────────────────────────────
-# VALIDATION — strict, schema-correct
-# ─────────────────────────────────────────────────────────────
-def validate_and_build_payload(data: dict, exp_domain: str, exp_difficulty: str) -> Optional[dict]:
-    if not isinstance(data, dict):
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 3: VALIDATE
+# ─────────────────────────────────────────────────────────────────────────────
+def validate(q: dict) -> Optional[dict]:
+    if not isinstance(q, dict):
         return None
 
-    q_text = (data.get("question_text") or "").strip()
-    if not q_text:
-        log.warning("Empty question_text — rejecting")
+    q_text = (q.get("question_text") or "").strip()
+    if not q_text or len(q_text) < 20:
         return None
 
-    bad_signals = ["{", "http://", "https://", "api.", "status:", "message-type"]
-    if any(s in q_text for s in bad_signals) or q_text.startswith("["):
-        log.warning(f"JSON/code leakage detected — rejecting: {q_text[:80]}")
+    bad = ["{", "http://", "https://", "api.", "status:", "message-type", "undefined"]
+    if any(s in q_text for s in bad) or q_text.startswith("["):
+        log.warning(f"Bad question_text content: {q_text[:80]}")
         return None
 
-    domain = data.get("domain", exp_domain)
+    domain = (q.get("domain") or "").strip()
     if domain not in VALID_DOMAINS:
-        domain = exp_domain
+        log.warning(f"Invalid domain: {domain}")
+        return None
 
-    difficulty = data.get("difficulty", exp_difficulty)
+    difficulty = (q.get("difficulty") or "Medium").strip()
     if difficulty not in VALID_DIFFICULTIES:
-        difficulty = exp_difficulty
+        difficulty = "Medium"
 
     module = DOMAIN_TO_MODULE.get(domain)
     if not module:
-        log.warning(f"Cannot determine module for domain: {domain}")
         return None
 
-    options = data.get("options")
+    options = q.get("options")
     if not isinstance(options, list) or len(options) != 4:
-        log.warning("Options malformed — rejecting")
+        log.warning("Options not 4-element array")
         return None
 
-    correct_answer = (data.get("correct_answer") or "").strip()
-    if not correct_answer:
-        log.warning("Missing correct_answer — rejecting")
+    # Clean options — strip any A./B./C./D. prefixes
+    options = [re.sub(r"^[A-Da-d][\.\)]\s*", "", str(o)).strip() for o in options]
+    if any(not o for o in options):
         return None
 
-    if correct_answer not in options:
-        letter_map = {chr(65 + i): options[i] for i in range(4)}
-        if correct_answer.upper() in letter_map:
-            correct_answer = letter_map[correct_answer.upper()]
+    correct = (q.get("correct_answer") or "").strip()
+    correct = re.sub(r"^[A-Da-d][\.\)]\s*", "", correct).strip()
+
+    if correct not in options:
+        # Try letter→option resolution
+        letter_map = {"A": options[0], "B": options[1], "C": options[2], "D": options[3]}
+        if correct.upper() in letter_map:
+            correct = letter_map[correct.upper()]
         else:
-            log.warning(f"correct_answer '{correct_answer}' not in options — rejecting")
+            log.warning(f"correct_answer not in options: {correct!r}")
             return None
 
-    rationale = (data.get("rationale") or "").strip()
+    rationale = (q.get("rationale") or "").strip()
     if not rationale:
-        rationale = f"The correct answer is '{correct_answer}'."
+        rationale = f"The correct answer is '{correct}'."
 
-    raw = (data.get("raw_original_text") or data.get("_seed") or "").strip()
+    raw = (q.get("raw_original_text") or "").strip()
 
-    # Build payload using ALL required sat_question_bank columns
     return {
         "module": module,
         "domain": domain,
         "difficulty": difficulty,
         "question_text": q_text,
         "options": options,
-        "correct_answer": correct_answer,
+        "correct_answer": correct,
         "rationale": rationale,
         "is_spr": False,
         "source_method": "Automated_Pipeline",
-        "raw_original_text": raw if raw else None,
+        "raw_original_text": raw or None,
     }
 
 
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# INVENTORY + QUEUE
+# ─────────────────────────────────────────────────────────────────────────────
+def build_queue(supabase: Client) -> list:
+    existing = {}
+    try:
+        rows = supabase.table("sat_question_bank").select("domain, difficulty").execute()
+        for r in rows.data:
+            k = (r["domain"], r["difficulty"])
+            existing[k] = existing.get(k, 0) + 1
+    except Exception as e:
+        log.warning(f"Inventory read failed: {e}")
+
+    scores = []
+    for bucket in ALL_BUCKETS:
+        actual = existing.get(bucket, 0)
+        deficit = max(0, TARGET_PER_BUCKET - actual) + 1
+        scores.append((bucket[0], bucket[1], deficit))
+
+    total = sum(s[2] for s in scores)
+    queue = []
+    for domain, diff, deficit in scores:
+        slots = max(1, round((deficit / total) * QUESTIONS_PER_RUN))
+        for _ in range(slots):
+            queue.append((domain, diff))
+
+    random.shuffle(queue)
+    return queue[:QUESTIONS_PER_RUN]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # MAIN
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 def main():
-    log.info("=== SCRAPER RUN START ===")
+    log.info("=== REAL-SOURCE SCRAPER RUN START ===")
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
     groq_client = Groq(api_key=GROQ_API_KEY)
 
+    # Pick a random selection of source pages, weighted toward thin buckets
     queue = build_queue(supabase)
+    needs_math = any(d in MATH_DOMAINS for d, _ in queue)
+    needs_rw = any(d in RW_DOMAINS for d, _ in queue)
+
+    sources_to_use = []
+    if needs_math:
+        math_sources = [(u, s, d) for u, s, d in CRACKSAT_SOURCES if s == "Math"]
+        sources_to_use.extend(random.sample(math_sources, min(3, len(math_sources))))
+    if needs_rw:
+        rw_sources = [(u, s, d) for u, s, d in CRACKSAT_SOURCES if s in ("Reading", "Writing")]
+        sources_to_use.extend(random.sample(rw_sources, min(3, len(rw_sources))))
+
+    if not sources_to_use:
+        sources_to_use = random.sample(CRACKSAT_SOURCES, 4)
+
+    random.shuffle(sources_to_use)
+
     inserted = 0
     skipped = 0
 
-    for i, (domain, difficulty) in enumerate(queue):
-        log.info(f"[{i+1}/{len(queue)}] Generating {domain} | {difficulty}…")
+    for url, subject, difficulty_hint in sources_to_use:
+        if inserted >= QUESTIONS_PER_RUN:
+            break
 
-        data = generate_question(groq_client, domain, difficulty)
-        if not data:
-            skipped += 1
-            continue
-
-        payload = validate_and_build_payload(data, domain, difficulty)
-        if not payload:
-            skipped += 1
-            continue
-
+        log.info(f"Fetching {url.split('/')[-1]} ({subject})...")
         try:
-            existing = supabase.table("sat_question_bank") \
-                .select("id") \
-                .eq("question_text", payload["question_text"]) \
-                .limit(1).execute()
-            if existing.data:
-                log.info("  Duplicate skipped.")
+            raw_text, answer_map = fetch_cracksat_page(url)
+        except Exception as e:
+            log.error(f"Fetch failed for {url}: {e}")
+            skipped += 1
+            time.sleep(2)
+            continue
+
+        if not answer_map:
+            log.warning(f"No answer key obtained for {url}")
+            skipped += 1
+            continue
+
+        log.info(f"Parsing + entity-swapping {len(answer_map)} questions via Groq...")
+        questions = parse_and_swap(groq_client, raw_text, answer_map, subject, difficulty_hint)
+        log.info(f"Groq returned {len(questions)} questions")
+
+        for q_raw in questions:
+            if inserted >= QUESTIONS_PER_RUN:
+                break
+
+            payload = validate(q_raw)
+            if not payload:
                 skipped += 1
                 continue
 
-            supabase.table("sat_question_bank").insert(payload).execute()
-            log.info(f"  ✓ Inserted: {domain} | {difficulty}")
-            inserted += 1
-        except Exception as e:
-            log.error(f"  ✗ Insert failed: {e}")
-            skipped += 1
+            try:
+                # Dedup check
+                existing = supabase.table("sat_question_bank") \
+                    .select("id") \
+                    .eq("question_text", payload["question_text"]) \
+                    .limit(1).execute()
+                if existing.data:
+                    log.info("  Duplicate — skipping")
+                    skipped += 1
+                    continue
 
-        time.sleep(random.uniform(2.0, 3.0))
+                supabase.table("sat_question_bank").insert(payload).execute()
+                log.info(f"  ✓ Inserted: {payload['domain']} | {payload['difficulty']}")
+                inserted += 1
+            except Exception as e:
+                log.error(f"  ✗ Insert failed: {e}")
+                skipped += 1
 
-    log.info(f"=== RUN COMPLETE: {inserted} inserted, {skipped} skipped ===")
+        time.sleep(random.uniform(3.0, 5.0))
+
+    log.info(f"=== DONE: {inserted} inserted, {skipped} skipped ===")
 
 
 if __name__ == "__main__":
