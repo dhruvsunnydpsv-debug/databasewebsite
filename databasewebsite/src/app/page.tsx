@@ -3,10 +3,13 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
+import { useRouter } from "next/navigation";
 
 export default function Home() {
+    const router = useRouter();
     const [scrolled, setScrolled] = useState(false);
     const [user, setUser] = useState<any>(null);
+    const supabase = createClient();
 
     useEffect(() => {
         const handleScroll = () => setScrolled(window.scrollY > 50);
@@ -15,8 +18,11 @@ export default function Home() {
     }, []);
 
     useEffect(() => {
-        const supabase = createClient();
         supabase.auth.getUser().then(({ data }) => setUser(data.user));
+        const { data: listener } = supabase.auth.onAuthStateChange((_e, session) => {
+            setUser(session?.user ?? null);
+        });
+        return () => listener.subscription.unsubscribe();
     }, []);
 
     return (
@@ -31,7 +37,7 @@ export default function Home() {
                 <div className="font-serif text-2xl font-black tracking-tighter text-[#0D0D0D]">
                     SAT Engine
                 </div>
-                <div className="flex items-center gap-6">
+                <div className="flex items-center gap-4">
                     <a
                         href="#domains"
                         className="hidden sm:block text-sm font-medium text-gray-500 hover:text-black transition-colors rounded-full px-4 py-2 hover:bg-black/5"
@@ -39,12 +45,26 @@ export default function Home() {
                         Curriculum
                     </a>
                     {user ? (
-                        <a
-                            href="/test/session/"
-                            className="px-8 py-2.5 bg-[#1A1A1A] text-[#FBFBF2] rounded-full text-sm font-bold hover:bg-black hover:-translate-y-0.5 transition-all shadow-lg active:scale-95"
-                        >
-                            Start Test →
-                        </a>
+                        <>
+                            <a
+                                href="/history"
+                                className="hidden sm:block text-sm font-medium text-gray-500 hover:text-black transition-colors rounded-full px-4 py-2 hover:bg-black/5"
+                            >
+                                My Scores
+                            </a>
+                            <a
+                                href="/test/session/"
+                                className="px-8 py-2.5 bg-[#1A1A1A] text-[#FBFBF2] rounded-full text-sm font-bold hover:bg-black hover:-translate-y-0.5 transition-all shadow-lg active:scale-95"
+                            >
+                                Start Test →
+                            </a>
+                            <button
+                                onClick={() => supabase.auth.signOut().then(() => router.refresh())}
+                                className="text-sm text-gray-400 hover:text-gray-700 transition-colors font-medium px-2"
+                            >
+                                Sign out
+                            </button>
+                        </>
                     ) : (
                         <a
                             href="/login"
