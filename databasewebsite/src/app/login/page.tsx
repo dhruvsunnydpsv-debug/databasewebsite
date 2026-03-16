@@ -3,6 +3,8 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase-browser'
 
+const SITE_URL = 'https://study.dhruvshah.co'
+
 export default function LoginPage() {
   const router = useRouter()
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
@@ -32,7 +34,7 @@ export default function LoginPage() {
       const { error } = await supabase.auth.signUp({
         email,
         password,
-        options: { emailRedirectTo: `${location.origin}/auth/callback` },
+        options: { emailRedirectTo: `${SITE_URL}/auth/callback` },
       })
       if (error) {
         setError(error.message)
@@ -47,7 +49,7 @@ export default function LoginPage() {
   async function handleGoogle() {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: `${location.origin}/auth/callback` },
+      options: { redirectTo: `${SITE_URL}/auth/callback` },
     })
     if (error) setError(error.message)
   }
@@ -55,9 +57,17 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen bg-[#FBFBF2] flex items-center justify-center px-4">
       <div className="w-full max-w-md">
+
         {/* Logo */}
         <div className="text-center mb-10">
-          <h1 className="font-serif text-3xl font-black tracking-tighter text-[#0D0D0D]">SAT Engine</h1>
+          <a href="/" className="inline-block">
+            <div className="flex items-center justify-center gap-2 mb-2">
+              <div className="w-8 h-8 bg-[#0D0D0D] rounded-lg flex items-center justify-center">
+                <span className="text-white text-xs font-black">S</span>
+              </div>
+              <h1 className="font-serif text-2xl font-black tracking-tight text-[#0D0D0D]">SAT Foundation</h1>
+            </div>
+          </a>
           <p className="text-sm text-gray-500 mt-2 font-medium">
             {mode === 'signin' ? 'Sign in to continue your practice' : 'Create your free account'}
           </p>
