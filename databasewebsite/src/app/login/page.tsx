@@ -57,7 +57,7 @@ export default function LoginPage() {
       <div className="w-full max-w-md">
         {/* Logo */}
         <div className="text-center mb-10">
-          <h1 className="font-serif text-3xl font-black tracking-tighter text-[#0D0D0D]">SAT Synthesis</h1>
+          <h1 className="font-serif text-3xl font-black tracking-tighter text-[#0D0D0D]">SAT Engine</h1>
           <p className="text-sm text-gray-500 mt-2 font-medium">
             {mode === 'signin' ? 'Sign in to continue your practice' : 'Create your free account'}
           </p>

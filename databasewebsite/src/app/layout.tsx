@@ -13,8 +13,8 @@ const playfair = Playfair_Display({
 })
 
 export const metadata: Metadata = {
-    title: 'SAT Synthesis — Digital Question Engine',
-    description: 'Entity-swap pipeline for generating copyright-free SAT questions at scale.',
+    title: 'SAT Engine — Adaptive Digital SAT Practice',
+    description: 'Adaptive digital SAT practice modeled exactly on Bluebook. Real questions, detailed score reports, track every domain.',
 }
 
 export default function RootLayout({
