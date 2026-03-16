@@ -1,35 +1,37 @@
-name: SAT Scraper — Auto Ingest
+name: SAT Question Scraper
 
 on:
   schedule:
-    - cron: '*/15 * * * *'
+    # Runs every 6 hours: midnight, 6am, noon, 6pm UTC
+    - cron: '0 0,6,12,18 * * *'
+  # Manual trigger from GitHub Actions tab
   workflow_dispatch:
 
 jobs:
-  harvest:
-    name: Harvest & Ingest SAT Questions
+  scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
 
     steps:
-      - name: Checkout
+      - name: Checkout repo
         uses: actions/checkout@v4
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
 
-      - name: Install Python dependencies
-        run: pip install supabase groq requests beautifulsoup4
+      - name: Install dependencies
+        run: pip install requests beautifulsoup4 supabase groq
 
-      - name: Run SAT Scraper
+      - name: Run scraper
+        working-directory: databasewebsite
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: python scraper.py
 
-      - name: Print job summary
-        if: always()
-        run: echo "Scraper run complete at $(date)"
+      - name: Log completion
+        run: echo "Scraper run complete at $(date -u)"
