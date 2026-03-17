@@ -1,11 +1,9 @@
-name: SAT Question Scraper
+name: SAT Foundation Question Scraper
 
 on:
   schedule:
-    # Runs every 6 hours: midnight, 6am, noon, 6pm UTC
-    - cron: '0 0,6,12,18 * * *'
-  # Manual trigger from GitHub Actions tab
-  workflow_dispatch:
+    - cron: '0 0,6,12,18 * * *'   # 4x daily — midnight, 6am, noon, 6pm UTC
+  workflow_dispatch:                # manual trigger from GitHub Actions tab
 
 jobs:
   scrape:
@@ -16,22 +14,18 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
 
       - name: Install dependencies
         run: pip install requests beautifulsoup4 supabase groq
 
       - name: Run scraper
-        working-directory: databasewebsite
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: python scraper.py
-
-      - name: Log completion
-        run: echo "Scraper run complete at $(date -u)"
