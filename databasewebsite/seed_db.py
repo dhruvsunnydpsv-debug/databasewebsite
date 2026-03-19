@@ -7,17 +7,42 @@ All questions follow the exact sat_question_bank schema.
 """
 
 import urllib.request
+import urllib.error
 import json
+import os
+from dotenv import load_dotenv
 
-SUPABASE_URL = "https://sihgnmrxdbhzjefeceqo.supabase.co"
-SERVICE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNpaGdubXJ4ZGJoemplZmVjZXFvIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjE2NjM4NiwiZXhwIjoyMDg3NzQyMzg2fQ.y-SggKShOdG1gYOLavSWAz7fDU9z5FvGrZBfGK-_hew"
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+    if not os.environ.get("NEXT_PUBLIC_SUPABASE_URL"):
+        load_dotenv("databasewebsite/.env")
+except ImportError:
+    pass
 
-HEADERS = {
-    "Content-Type": "application/json",
-    "apikey": SERVICE_KEY,
-    "Authorization": f"Bearer {SERVICE_KEY}",
-    "Prefer": "return=minimal",
-}
+SUPABASE_URL = str(os.environ.get("NEXT_PUBLIC_SUPABASE_URL", "https://sihgnmrxdbhzjefeceqo.supabase.co"))
+
+# Initialize headers after env load
+def get_headers():
+    k = str(os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or "")
+    return {
+        "Content-Type": "application/json",
+        "apikey": k,
+        "Authorization": f"Bearer {k}",
+        "Prefer": "return=minimal",
+    }
+
+# --- EXAMPLE ACT QUESTION ---
+# {
+#     "exam_type": "ACT",
+#     "section": "Math",
+#     "module": "Math",  -- existing column, reused
+#     "domain": "Algebra",
+#     "difficulty": "Medium",
+#     "question_text": "Solve for x: 3x + 5 = 20",
+#     "correct_answer": "5",
+#     "is_spr": True
+# }
 
 SEED_QUESTIONS = [
     # ── INFORMATION AND IDEAS ──────────────────────────────────────────────
@@ -349,8 +374,8 @@ SEED_QUESTIONS = [
             "to line m and passes through the point (4, 3). What is the y-intercept of line n?"
         ),
         "options": ["-5", "-3", "1", "3"],
-        "correct_answer": "-5",
-        "rationale": "Slope of m = (1-7)/(5-2) = -2; slope of n = 1/2 (negative reciprocal). Using point-slope: y - 3 = (1/2)(x - 4), so y = x/2 + 1. At x=0: y = 1. Wait—let me recalculate: y = (1/2)(0) + 1 = 1. Checking: the y-intercept is 1.",
+        "correct_answer": "1",
+        "rationale": "Slope of m = (1-7)/(5-2) = -2; slope of n = 1/2 (negative reciprocal). Using point-slope: y - 3 = (1/2)(x - 4), so y = x/2 + 1. At x=0: y = 1.",
         "raw_original_text": "Line m passes through (2, 7) and (5, 1). Line n is perpendicular to m and passes through (4, 3).",
     },
     # ── ADVANCED MATH ─────────────────────────────────────────────────────
@@ -501,10 +526,31 @@ SEED_QUESTIONS = [
 ]
 
 
-def insert_one(row):
+def insert_one(row, exam_type='SAT', section=None):
+    # Avoid mutating the original input row
+    row = dict(row)
+    
+    # Set default exam_type and normalize
+    row['exam_type'] = str(row.get('exam_type') or exam_type or 'SAT').upper()
+    
+    # Apply ACT-specific rules
+    if row['exam_type'] == 'ACT':
+        if section:
+            row.setdefault('section', section)
+        if 'section' not in row:
+            raise ValueError("ACT questions must have a 'section' defined (English, Math, Reading, or Science)")
+        # Clean for ACT
+        row.pop('module', None)
+    
+    # Apply SAT-specific rules
+    if row['exam_type'] == 'SAT':
+        row.setdefault('module', 'Math')
+        # Ensure section is absent/NULL for SAT
+        row.pop('section', None)
+        
     payload = json.dumps([row]).encode()
     url = f"{SUPABASE_URL}/rest/v1/sat_question_bank"
-    req = urllib.request.Request(url, data=payload, headers=HEADERS, method="POST")
+    req = urllib.request.Request(url, data=payload, headers=get_headers(), method="POST")
     try:
         with urllib.request.urlopen(req) as r:
             return r.status, None

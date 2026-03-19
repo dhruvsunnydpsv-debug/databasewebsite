@@ -37,6 +37,8 @@ jobs:
         run: |
           cd databasewebsite
           python scraper.py
+          python math_booster.py
+          python act_booster.py
 
       - name: Print job summary
         if: always()

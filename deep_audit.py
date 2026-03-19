@@ -36,7 +36,7 @@ VALID_DOMAINS = [
     "Craft and Structure", "Information and Ideas", "Standard English Conventions", "Expression of Ideas"
 ]
 
-def analyze_and_fix_question(row):
+def analyze_and_fix_qu estion(row):
     """
     1. Checks if the answer is correct.
     2. Maps to 2026 Syllabus domains.

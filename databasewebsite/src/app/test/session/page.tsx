@@ -243,8 +243,14 @@ export default function AdaptiveBluebookSession() {
       }
       let query = supabase.from('sat_question_bank').select('*').in('domain', domains);
       if (difficulty) query = query.eq('difficulty', difficulty);
-      const { data, error } = await query.limit(limit * 3);
+      let { data, error } = await query.limit(limit * 3);
       if (error) { console.error(error); setLoading(false); return; }
+      if (difficulty && (!data || data.length < limit)) {
+        const fallback = await supabase.from('sat_question_bank').select('*').in('domain', domains).limit(limit * 3);
+        if (!fallback.error && fallback.data && fallback.data.length > 0) {
+          data = fallback.data;
+        }
+      }
       const seen = new Set<string>();
       const unique: any[] = [];
       for (const q of data || []) {

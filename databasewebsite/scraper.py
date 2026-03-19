@@ -49,6 +49,21 @@ VALID_DIFFICULTIES = {"Easy", "Medium", "Hard"}
 DOMAIN_TO_MODULE   = {d: "Reading_Writing" for d in RW_DOMAINS}
 DOMAIN_TO_MODULE.update({d: "Math" for d in MATH_DOMAINS})
 
+# ── ACT Domains / Sections ───────────────────────────────────────────────────
+ACT_ENGLISH_DOMAINS = {"Production of Writing", "Knowledge of Language", "Conventions of Standard English"}
+ACT_MATH_DOMAINS    = {"Pre-Algebra", "Elementary Algebra", "Intermediate Algebra", "Coordinate Geometry", "Plane Geometry", "Trigonometry"}
+ACT_READING_DOMAINS = {"Key Ideas and Details", "Craft and Structure", "Integration of Knowledge and Ideas"}
+ACT_SCIENCE_DOMAINS = {"Interpretation of Data", "Scientific Investigation", "Evaluation of Models, Inferences, and Experimental Results"}
+ACT_DOMAINS         = ACT_ENGLISH_DOMAINS | ACT_MATH_DOMAINS | ACT_READING_DOMAINS | ACT_SCIENCE_DOMAINS
+
+DOMAIN_TO_SECTION = {d: "English" for d in ACT_ENGLISH_DOMAINS}
+DOMAIN_TO_SECTION.update({d: "Math" for d in ACT_MATH_DOMAINS})
+DOMAIN_TO_SECTION.update({d: "Reading" for d in ACT_READING_DOMAINS})
+DOMAIN_TO_SECTION.update({d: "Science" for d in ACT_SCIENCE_DOMAINS})
+
+# Combined validation
+VALID_DOMAINS = VALID_DOMAINS | ACT_DOMAINS
+
 ALL_BUCKETS = [
     (d, diff)
     for d in [
@@ -258,9 +273,26 @@ def validate(q: dict) -> Optional[dict]:
     if difficulty == "Easy" and q_text.count("\n") > 6 and len(q_text) > 600:
         difficulty = "Medium" # long passage questions are at least Medium
 
-    module = DOMAIN_TO_MODULE.get(domain)
-    if not module:
-        return None
+    exam_type = (q.get("exam_type") or "SAT").strip().upper()
+    if exam_type not in {"SAT", "ACT"}:
+        exam_type = "SAT"
+
+    module = None
+    section = None
+
+    if exam_type == "SAT":
+        module = DOMAIN_TO_MODULE.get(domain)
+        if not module:
+            log.warning(f"Invalid SAT domain: {domain!r}")
+            return None
+    else: # ACT
+        section = DOMAIN_TO_SECTION.get(domain)
+        if not section:
+            # Fallback for generic section passing
+            section = (q.get("section") or q.get("group_name") or "").strip()
+            if not section:
+                log.warning(f"Invalid ACT domain/section: {domain!r}")
+                return None
 
     options = q.get("options")
     if not isinstance(options, list) or len(options) != 4:
@@ -303,7 +335,9 @@ def validate(q: dict) -> Optional[dict]:
     raw = (q.get("raw_original_text") or "").strip()
 
     return {
+        "exam_type":         exam_type,
         "module":            module,
+        "section":           section,
         "domain":            domain,
         "difficulty":        difficulty,
         "question_text":     q_text,
