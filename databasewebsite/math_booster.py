@@ -83,17 +83,31 @@ RULES:
 def generate_question(client: Groq, bucket: tuple) -> Optional[dict]:
     m, d, diff, spr = bucket
     prompt = build_prompt(m, d, diff, spr)
-    try:
-        response = client.chat.completions.create(
-            model=MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"},
-            temperature=0.7,
-        )
-        return json.loads(response.choices[0].message.content.strip())
-    except Exception as e:
-        log.error(f"Error generating question: {e}")
-        return None
+    
+    max_retries = 5
+    for attempt in range(max_retries):
+        try:
+            response = client.chat.completions.create(
+                model=MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
+                temperature=0.7,
+            )
+            return json.loads(response.choices[0].message.content.strip())
+        except Exception as e:
+            err_msg = str(e).lower()
+            if "rate_limit" in err_msg or "429" in err_msg:
+                # Exponential backoff + jitter
+                wait_time = min(60, (2 ** attempt)) + random.uniform(1, 4)
+                log.warning(f"Rate limit hit. Retrying in {wait_time:.2f}s... (Attempt {attempt + 1}/{max_retries})")
+                time.sleep(wait_time)
+            else:
+                log.error(f"Error generating question: {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(2)
+                    continue
+                return None
+    return None
 
 def main():
     print("--- STARTING MATH BOOSTER ---")
@@ -125,7 +139,7 @@ def main():
                 inserted += 1
             except Exception as e:
                 log.error(f"Insert failed: {e}")
-        time.sleep(1)
+        time.sleep(3) # Respect rate limits
 
     print(f"Boost complete. Added {inserted} Math questions.")
 

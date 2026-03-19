@@ -24,6 +24,24 @@ from groq import Groq
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
+CACHE_FILE = "scraper_cache.json"
+
+def load_cache() -> dict:
+    if os.path.exists(CACHE_FILE):
+        try:
+            with open(CACHE_FILE, "r") as f:
+                return json.load(f)
+        except Exception as e:
+            log.warning(f"Could not load cache: {e}")
+    return {}
+
+def save_cache(cache: dict):
+    try:
+        with open(CACHE_FILE, "w") as f:
+            json.dump(cache, f, indent=2)
+    except Exception as e:
+        log.warning(f"Could not save cache: {e}")
+
 # ── Credentials ─────────────────────────────────────────────────────────────
 SUPABASE_URL  = os.environ["NEXT_PUBLIC_SUPABASE_URL"]
 SUPABASE_KEY  = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ["NEXT_PUBLIC_SUPABASE_ANON_KEY"]
@@ -194,48 +212,65 @@ Return ONLY the JSON array. No markdown fences. No extra text."""
 
 def parse_and_swap(groq_client: Groq, raw_text: str, answer_map: dict,
                    subject_hint: str, difficulty_hint: str) -> list[dict]:
-    answer_str = ", ".join(
-        f"{k}:{v}" for k, v in sorted(answer_map.items(),
-        key=lambda x: int(x[0]) if x[0].isdigit() else 999)
-    )
-    user_msg = (
-        f"Subject: {subject_hint} | Difficulty hint: {difficulty_hint}\n"
-        f"Correct answers: {answer_str}\n\n"
-        f"Raw test text:\n{raw_text[:3500]}"
-    )
+    
+    # Split answer_map into chunks of 3 (user recommended 1-3)
+    # This avoids hitting 429s from large response objects
+    answers_list = sorted(answer_map.items(), key=lambda x: int(x[0]) if x[0].isdigit() else 999)
+    chunks = [answers_list[i:i + 3] for i in range(0, len(answers_list), 3)]
+    
+    all_questions = []
+    
+    for chunk_idx, chunk in enumerate(chunks):
+        answer_str = ", ".join(f"{k}:{v}" for k, v in chunk)
+        user_msg = (
+            f"Subject: {subject_hint} | Difficulty hint: {difficulty_hint} | Chunk: {chunk_idx+1}/{len(chunks)}\n"
+            f"PROCESS ONLY THESE QUESTIONS: {answer_str}\n\n"
+            f"Raw test text:\n{raw_text[:3500]}"
+        )
 
-    for attempt in range(3):
-        try:
-            resp = groq_client.chat.completions.create(
-                model=MODEL,
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user",   "content": user_msg},
-                ],
-                response_format={"type": "json_object"},
-                temperature=0.2,
-                max_tokens=4096,
-            )
-            raw  = resp.choices[0].message.content.strip()
-            data = json.loads(raw)
-            if isinstance(data, dict):
-                questions = data.get("questions") or data.get("data") or list(data.values())[0]
-            else:
-                questions = data
-            if isinstance(questions, list):
-                return questions
-        except json.JSONDecodeError as e:
-            log.error(f"JSON parse error attempt {attempt+1}: {e}")
-        except Exception as e:
-            err = str(e)
-            if "rate_limit" in err.lower() or "429" in err:
-                wait = 25 * (2 ** attempt)
-                log.warning(f"Rate limit — waiting {wait}s…")
-                time.sleep(wait)
-            else:
-                log.error(f"Groq error: {e}")
-                return []
-    return []
+        max_retries = 5
+        chunk_questions = []
+        for attempt in range(max_retries):
+            try:
+                resp = groq_client.chat.completions.create(
+                    model=MODEL,
+                    messages=[
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user",   "content": user_msg},
+                    ],
+                    response_format={"type": "json_object"},
+                    temperature=0.2,
+                    max_tokens=4096,
+                )
+                raw  = resp.choices[0].message.content.strip()
+                data = json.loads(raw)
+                if isinstance(data, dict):
+                    q_list = data.get("questions") or data.get("data") or list(data.values())[0]
+                else:
+                    q_list = data
+                
+                if isinstance(q_list, list):
+                    chunk_questions = q_list
+                    break
+            except Exception as e:
+                err_msg = str(e).lower()
+                if "rate_limit" in err_msg or "429" in err_msg:
+                    wait = min(60, 25 * (2 ** attempt)) + random.uniform(2, 5)
+                    log.warning(f"Rate limit hit in chunk {chunk_idx+1}. Waiting {wait:.2f}s...")
+                    time.sleep(wait)
+                else:
+                    log.error(f"Groq error in chunk {chunk_idx+1}: {e}")
+                    if attempt < max_retries - 1:
+                        time.sleep(5)
+                        continue
+                    break
+        
+        if chunk_questions:
+            all_questions.extend(chunk_questions)
+            # Small delay between chunks to avoid immediate 429
+            time.sleep(2)
+            
+    return all_questions
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -466,6 +501,9 @@ def main():
     # Inventory
     counts = get_inventory(supabase)
     print_inventory(counts)
+    
+    # Load Cache
+    cache = load_cache()
 
     # Priority queue
     queue = build_priority_queue(counts)
@@ -511,9 +549,19 @@ def main():
             log.warning("No answer key — skipping page")
             continue
 
-        log.info(f"Parsing {len(answer_map)} questions via Groq…")
-        questions = parse_and_swap(groq_client, raw_text, answer_map, subject, difficulty_hint)
-        log.info(f"Groq returned {len(questions)} questions")
+        url_hash = hashlib.md5(url.encode()).hexdigest()
+        if url_hash in cache:
+            log.info(f"  Using cached questions for {url.split('/')[-1]}...")
+            questions = cache[url_hash]
+        else:
+            log.info(f"Parsing {len(answer_map)} questions via Groq (in chunks of 3)…")
+            questions = parse_and_swap(groq_client, raw_text, answer_map, subject, difficulty_hint)
+            if questions:
+                cache[url_hash] = questions
+                save_cache(cache)
+                log.info(f"  Cached {len(questions)} questions")
+        
+        log.info(f"Total {len(questions)} questions to process")
 
         for q_raw in questions:
             if inserted >= QUESTIONS_PER_RUN:
