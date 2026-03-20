@@ -29,7 +29,7 @@ jobs:
       - name: Install Python dependencies
         run: pip install supabase groq requests beautifulsoup4
 
-      - name: Run SAT Scraper
+      - name: Run SAT Pipeline
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -38,7 +38,6 @@ jobs:
           cd databasewebsite
           python scraper.py
           python math_booster.py
-          python act_booster.py
 
       - name: Print job summary
         if: always()
