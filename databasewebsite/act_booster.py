@@ -23,7 +23,11 @@ log = logging.getLogger(__name__)
 
 SUPABASE_URL = os.environ["NEXT_PUBLIC_SUPABASE_URL"]
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ["NEXT_PUBLIC_SUPABASE_ANON_KEY"]
-GROQ_API_KEY = os.environ["GROQ_API_KEY"]
+
+# Support single or multiple comma-separated keys
+GROQ_KEYS = [k.strip() for k in os.environ.get("GROQ_API_KEY", "").split(",") if k.strip()]
+if not GROQ_KEYS:
+    raise ValueError("GROQ_API_KEY environment variable is not set correctly.")
 
 QUESTIONS_PER_RUN = 5
 MODEL = "llama-3.3-70b-versatile" # Higher quality for ACT complexity
@@ -84,14 +88,16 @@ RULES:
 2. LOGIC CHECK: Ensure the answer is flawless.
 3. JSON ONLY: Response must be JSON only. No markdown fences."""
 
-def generate_act_question(client: Groq, bucket: tuple) -> Optional[dict]:
+def generate_act_question(bucket: tuple) -> Optional[dict]:
     s, d, diff = bucket
     prompt = build_prompt(s, d, diff)
     
-    max_retries = 5
+    max_retries = len(GROQ_KEYS) * 3
     for attempt in range(max_retries):
+        current_key = GROQ_KEYS[attempt % len(GROQ_KEYS)]
         try:
-            response = client.chat.completions.create(
+            temp_client = Groq(api_key=current_key)
+            response = temp_client.chat.completions.create(
                 model=MODEL,
                 messages=[{"role": "user", "content": prompt}],
                 response_format={"type": "json_object"},
@@ -101,15 +107,17 @@ def generate_act_question(client: Groq, bucket: tuple) -> Optional[dict]:
         except Exception as e:
             err_msg = str(e).lower()
             if "rate_limit" in err_msg or "429" in err_msg:
-                # Exponential backoff + jitter
-                wait_time = min(60, (2 ** attempt)) + random.uniform(1, 3)
-                log.warning(f"Rate limit hit. Retrying in {wait_time:.2f}s... (Attempt {attempt + 1}/{max_retries})")
-                time.sleep(wait_time)
+                if len(GROQ_KEYS) > 1:
+                    log.warning(f"Rate limit hit on key {attempt % len(GROQ_KEYS) + 1}. Rotating...")
+                    time.sleep(2)
+                else:
+                    wait_time = min(70, 30 * (2 ** attempt)) + random.uniform(5, 10)
+                    log.warning(f"Rate limit hit. Retrying in {wait_time:.2f}s... (Attempt {attempt + 1}/{max_retries})")
+                    time.sleep(wait_time)
             else:
                 log.error(f"Error generating ACT question: {e}")
-                # For other errors, we might still want to retry or just fail
                 if attempt < max_retries - 1:
-                    time.sleep(2)
+                    time.sleep(5)
                     continue
                 return None
     return None
@@ -117,13 +125,12 @@ def generate_act_question(client: Groq, bucket: tuple) -> Optional[dict]:
 def main():
     log.info("--- STARTING ACT BOOSTER ---")
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-    groq_client = Groq(api_key=GROQ_API_KEY)
 
     inserted = 0
     for _ in range(QUESTIONS_PER_RUN):
         bucket = random.choice(ACT_BUCKETS)
         log.info(f"Generating for {bucket}...")
-        data = generate_act_question(groq_client, bucket)
+        data = generate_act_question(bucket)
         
         if data:
             try:

@@ -45,7 +45,11 @@ def save_cache(cache: dict):
 # ── Credentials ─────────────────────────────────────────────────────────────
 SUPABASE_URL  = os.environ["NEXT_PUBLIC_SUPABASE_URL"]
 SUPABASE_KEY  = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ["NEXT_PUBLIC_SUPABASE_ANON_KEY"]
-GROQ_API_KEY  = os.environ["GROQ_API_KEY"]
+
+# Support single or multiple comma-separated keys
+GROQ_KEYS = [k.strip() for k in os.environ.get("GROQ_API_KEY", "").split(",") if k.strip()]
+if not GROQ_KEYS:
+    raise ValueError("GROQ_API_KEY environment variable is not set correctly.")
 
 MODEL              = "llama-3.3-70b-versatile"
 QUESTIONS_PER_RUN  = 15   # max per run — respects Groq rate limits
@@ -228,11 +232,14 @@ def parse_and_swap(groq_client: Groq, raw_text: str, answer_map: dict,
             f"Raw test text:\n{raw_text[:3500]}"
         )
 
-        max_retries = 5
+        max_retries = len(GROQ_KEYS) * 3  # retry across keys
         chunk_questions = []
         for attempt in range(max_retries):
+            current_key = GROQ_KEYS[attempt % len(GROQ_KEYS)]
             try:
-                resp = groq_client.chat.completions.create(
+                # Create a fresh client with the current key
+                temp_client = Groq(api_key=current_key)
+                resp = temp_client.chat.completions.create(
                     model=MODEL,
                     messages=[
                         {"role": "system", "content": SYSTEM_PROMPT},
@@ -255,9 +262,14 @@ def parse_and_swap(groq_client: Groq, raw_text: str, answer_map: dict,
             except Exception as e:
                 err_msg = str(e).lower()
                 if "rate_limit" in err_msg or "429" in err_msg:
-                    wait = min(60, 25 * (2 ** attempt)) + random.uniform(2, 5)
-                    log.warning(f"Rate limit hit in chunk {chunk_idx+1}. Waiting {wait:.2f}s...")
-                    time.sleep(wait)
+                    # If multiple keys, try next key immediately. If one key, wait.
+                    if len(GROQ_KEYS) > 1:
+                        log.warning(f"Rate limit hit on key {attempt % len(GROQ_KEYS) + 1}. Rotating...")
+                        time.sleep(2) # small buffer
+                    else:
+                        wait = min(70, 30 * (2 ** attempt)) + random.uniform(5, 10)
+                        log.warning(f"Rate limit hit. Waiting {wait:.2f}s...")
+                        time.sleep(wait)
                 else:
                     log.error(f"Groq error in chunk {chunk_idx+1}: {e}")
                     if attempt < max_retries - 1:
@@ -267,8 +279,8 @@ def parse_and_swap(groq_client: Groq, raw_text: str, answer_map: dict,
         
         if chunk_questions:
             all_questions.extend(chunk_questions)
-            # Small delay between chunks to avoid immediate 429
-            time.sleep(2)
+            # Increased delay between chunks to avoid 429
+            time.sleep(5)
             
     return all_questions
 
@@ -496,7 +508,6 @@ def main():
     log.info("═══════════════════════════════════════════")
 
     supabase     = create_client(SUPABASE_URL, SUPABASE_KEY)
-    groq_client  = Groq(api_key=GROQ_API_KEY)
 
     # Inventory
     counts = get_inventory(supabase)

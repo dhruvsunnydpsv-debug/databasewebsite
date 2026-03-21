@@ -9,21 +9,15 @@ from dotenv import load_dotenv
 # Load credentials from .env (search in current and parent dir)
 load_dotenv()
 if not os.environ.get("GROQ_API_KEY"):
-    load_dotenv("../.env")
+    raise ValueError("GROQ_API_KEY environment variable is not set correctly.")
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-log = logging.getLogger(__name__)
+# Support single or multiple comma-separated keys
+GROQ_KEYS = [k.strip() for k in os.environ.get("GROQ_API_KEY", "").split(",") if k.strip()]
 
 SUPABASE_URL = os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("NEXT_PUBLIC_SUPABASE_ANON_KEY")
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-
-if not all([SUPABASE_URL, SUPABASE_KEY, GROQ_API_KEY]):
-    missing = [k for k, v in {"URL": SUPABASE_URL, "KEY": SUPABASE_KEY, "GROQ": GROQ_API_KEY}.items() if not v]
-    raise ValueError(f"Missing: {', '.join(missing)}. Please check your .env file.")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-groq_client = Groq(api_key=GROQ_API_KEY)
 MODEL = "llama-3.1-8b-instant"
 
 def repair_tags(row_id: str, question_text: str):
@@ -51,9 +45,12 @@ Respond in plain JSON only (no markdown code blocks, no trailing commas):
   "difficulty": "<difficulty>"
 }}"""
 
-    for attempt in range(3):
+    max_retries = len(GROQ_KEYS) * 2
+    for attempt in range(max_retries):
+        current_key = GROQ_KEYS[attempt % len(GROQ_KEYS)]
         try:
-            response = groq_client.chat.completions.create(
+            temp_client = Groq(api_key=current_key)
+            response = temp_client.chat.completions.create(
                 model=MODEL,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
@@ -63,10 +60,20 @@ Respond in plain JSON only (no markdown code blocks, no trailing commas):
             data = json.loads(raw)
             return data
         except Exception as e:
-            if "rate_limit" in str(e).lower() or "429" in str(e):
-                time.sleep(2 * (attempt + 1))
+            err_msg = str(e).lower()
+            if "rate_limit" in err_msg or "429" in err_msg:
+                if len(GROQ_KEYS) > 1:
+                    log.warning(f"Rate limit hit on key {attempt % len(GROQ_KEYS) + 1}. Rotating...")
+                    time.sleep(1)
+                else:
+                    wait = 5 * (attempt + 1)
+                    log.warning(f"Rate limit hit. Waiting {wait}s...")
+                    time.sleep(wait)
             else:
                 log.error(f"Groq API error on attempt {attempt+1}: {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(2)
+                    continue
     return None
 
 def main():

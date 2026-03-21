@@ -17,7 +17,11 @@ log = logging.getLogger(__name__)
 # ── Credentials ─────────────────────────────────────────────────────────────
 SUPABASE_URL  = os.environ["NEXT_PUBLIC_SUPABASE_URL"]
 SUPABASE_KEY  = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ["NEXT_PUBLIC_SUPABASE_ANON_KEY"]
-GROQ_API_KEY  = os.environ["GROQ_API_KEY"]
+
+# Support single or multiple comma-separated keys
+GROQ_KEYS = [k.strip() for k in os.environ.get("GROQ_API_KEY", "").split(",") if k.strip()]
+if not GROQ_KEYS:
+    raise ValueError("GROQ_API_KEY environment variable is not set correctly.")
 
 MODEL              = "llama-3.3-70b-versatile"
 QUESTIONS_PER_RUN  = 10
@@ -133,11 +137,13 @@ def parse_with_backoff(groq_client: Groq, text: str, answers: dict, section: str
             f"Content Context:\n{text[:6000]}"
         )
         
-        max_retries = 5
+        max_retries = len(GROQ_KEYS) * 3
         chunk_questions = []
         for attempt in range(max_retries):
+            current_key = GROQ_KEYS[attempt % len(GROQ_KEYS)]
             try:
-                resp = groq_client.chat.completions.create(
+                temp_client = Groq(api_key=current_key)
+                resp = temp_client.chat.completions.create(
                     model=MODEL,
                     messages=[{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": user_msg}],
                     response_format={"type": "json_object"},
@@ -152,9 +158,13 @@ def parse_with_backoff(groq_client: Groq, text: str, answers: dict, section: str
             except Exception as e:
                 err = str(e).lower()
                 if "rate_limit" in err or "429" in err:
-                    wait = min(60, 25 * (2 ** attempt)) + random.uniform(2, 5)
-                    log.warning(f"Rate limit hit in chunk {chunk_idx+1}. Waiting {wait:.2f}s...")
-                    time.sleep(wait)
+                    if len(GROQ_KEYS) > 1:
+                        log.warning(f"Rate limit hit on key {attempt % len(GROQ_KEYS) + 1}. Rotating...")
+                        time.sleep(2)
+                    else:
+                        wait = min(70, 30 * (2 ** attempt)) + random.uniform(5, 10)
+                        log.warning(f"Rate limit hit. Waiting {wait:.2f}s...")
+                        time.sleep(wait)
                 else:
                     log.error(f"Groq error in chunk {chunk_idx+1}: {e}")
                     if attempt < max_retries - 1:
@@ -164,14 +174,13 @@ def parse_with_backoff(groq_client: Groq, text: str, answers: dict, section: str
         
         if chunk_questions:
             all_questions.extend(chunk_questions)
-            time.sleep(2) # Small delay between chunks
+            time.sleep(5) # Increased delay
             
     return all_questions
 
 def main():
     log.info("--- STARTING ACT SCRAPER (CrackAB) ---")
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-    groq_client = Groq(api_key=GROQ_API_KEY)
 
     cache = load_cache()
     sources = random.sample(CRACKAB_SOURCES, min(2, len(CRACKAB_SOURCES)))
@@ -198,32 +207,32 @@ def main():
                 log.error(f"Failed to process {url}: {e}")
                 continue
             
-        for q in questions:
-                if inserted >= QUESTIONS_PER_RUN: break
-                
-                payload = {
-                    "exam_type": "ACT",
-                    "section": q.get("section") or section,
-                    "domain": q.get("domain") or "General",
-                    "difficulty": q.get("difficulty") or diff_hint,
-                    "question_text": q.get("question_text"),
-                    "options": q.get("options"),
-                    "correct_answer": q.get("correct_answer"),
-                    "rationale": q.get("rationale"),
-                    "is_spr": False,
-                    "source_method": "Automated_Scraper_CrackAB",
-                    "raw_original_text": q.get("raw_original_text") or "[CrackAB Synthesis]"
-                }
-                
-                try:
-                    supabase.table("sat_question_bank").insert(payload).execute()
-                    log.info(f"  ✓ Inserted: {payload['section']} ({payload['difficulty']})")
-                    inserted += 1
-                except Exception as e:
-                    log.error(f"Insert failed: {e}")
+        try:
+            for q in questions:
+                    if inserted >= QUESTIONS_PER_RUN: break
                     
+                    payload = {
+                        "exam_type": "ACT",
+                        "section": q.get("section") or section,
+                        "domain": q.get("domain") or "General",
+                        "difficulty": q.get("difficulty") or diff_hint,
+                        "question_text": q.get("question_text"),
+                        "options": q.get("options"),
+                        "correct_answer": q.get("correct_answer"),
+                        "rationale": q.get("rationale"),
+                        "is_spr": False,
+                        "source_method": "Automated_Scraper_CrackAB",
+                        "raw_original_text": q.get("raw_original_text") or "[CrackAB Synthesis]"
+                    }
+                    
+                    try:
+                        supabase.table("sat_question_bank").insert(payload).execute()
+                        log.info(f"  ✓ Inserted: {payload['section']} ({payload['difficulty']})")
+                        inserted += 1
+                    except Exception as e:
+                        log.error(f"Insert failed: {e}")
         except Exception as e:
-            log.error(f"Failed to process {url}: {e}")
+            log.error(f"Failed to process questions from {url}: {e}")
 
     log.info(f"ACT Scraper complete. Inserted {inserted} questions.")
 

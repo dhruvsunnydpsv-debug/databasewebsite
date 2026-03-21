@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import Groq from "groq-sdk";
 import { createClient } from "@supabase/supabase-js";
 
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const supabase = createClient(supabaseUrl, supabaseKey);
@@ -73,11 +72,20 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: 'No valid question blocks found in file' }, { status: 400 });
         }
 
+        const groqKeys = (process.env.GROQ_API_KEY || "").split(',').map(k => k.trim()).filter(Boolean);
+        if (groqKeys.length === 0) {
+           return NextResponse.json({ error: 'GROQ_API_KEY is not configured' }, { status: 500 });
+        }
+
         const results = [];
 
-        for (const raw_q of rawQuestions) {
+        for (let i = 0; i < rawQuestions.length; i++) {
+            const raw_q = rawQuestions[i];
+            const currentKey = groqKeys[i % groqKeys.length];
+            const groqClient = new Groq({ apiKey: currentKey });
+
             try {
-                const completion = await groq.chat.completions.create({
+                const completion = await groqClient.chat.completions.create({
                     model: "llama-3.3-70b-versatile",
                     messages: [
                         { role: "system", content: SYSTEM_PROMPT },
