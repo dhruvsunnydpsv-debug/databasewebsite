@@ -1,44 +1,71 @@
-name: SAT Scraper — Auto Ingest
+name: SAT Question Scraper
 
 on:
-  schedule:
-    # Every 15 minutes, 24/7
-    - cron: '*/15 * * * *'
   workflow_dispatch:
     inputs:
-      dry_run:
-        description: 'Dry run (no insert)'
+      domain:
+        description: 'SAT domain to target (leave empty for all domains)'
         required: false
-        default: 'false'
+        type: string
+      count:
+        description: 'Exact number of NEW questions to insert per domain'
+        required: false
+        default: '25'
+        type: string
+
+  # Scheduled top-up — 6 AM and 6 PM UTC, all 8 domains each run
+  schedule:
+    - cron: '0 6 * * *'
+    - cron: '0 18 * * *'
 
 jobs:
-  harvest:
-    name: Harvest & Ingest SAT Questions
+  scrape-and-ingest:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 50
+    strategy:
+      matrix:
+        domain:
+          - Algebra
+          - Advanced Math
+          - Problem-solving and Data Analysis
+          - Geometry and Trigonometry
+          - Information and Ideas
+          - Craft and Structure
+          - Expression of Ideas
+          - Standard English Conventions
+      max-parallel: 2
+      fail-fast: false
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v4
+      - name: Check if this domain should run
+        id: should_run
+        run: |
+          INPUT_DOMAIN="${{ github.event.inputs.domain }}"
+          MATRIX_DOMAIN="${{ matrix.domain }}"
+          if [ -z "$INPUT_DOMAIN" ] || [ "$INPUT_DOMAIN" = "$MATRIX_DOMAIN" ]; then
+            echo "run=true" >> $GITHUB_OUTPUT
+          else
+            echo "run=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set up Python
+        if: steps.should_run.outputs.run == 'true'
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
 
-      - name: Install Python dependencies
+      - name: Install dependencies
+        if: steps.should_run.outputs.run == 'true'
         run: pip install supabase groq requests beautifulsoup4
 
-      - name: Run SAT Pipeline
+      - name: Scrape + entity-swap + insert for ${{ matrix.domain }}
+        if: steps.should_run.outputs.run == 'true'
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-        run: |
-          cd databasewebsite
-          python scraper.py
-          python math_booster.py
-
-      - name: Print job summary
-        if: always()
-        run: echo "### ✅ Scraper run complete at $(date -u)" >> $GITHUB_STEP_SUMMARY
+          TARGET_DOMAIN: ${{ matrix.domain }}
+          TARGET_COUNT: ${{ github.event.inputs.count || '25' }}
+        run: python scripts/scraper.py
