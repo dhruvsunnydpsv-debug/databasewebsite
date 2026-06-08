@@ -52,7 +52,7 @@ CRACKSAT_DIGITAL_MATH = [
 
 CRACKSAT_DIGITAL_RW = [
     f"https://www.cracksat.net/digital/reading-writing/test{i}.html"
-    for i in range(1, 76)
+    for i in range(1, 141)   # verified live to test130 — was 1-75, now the full pool
 ]
 
 # ── FRESH SOURCES: CrackSAT legacy /sat/ pages ───────────────────────────────
@@ -63,19 +63,19 @@ CRACKSAT_DIGITAL_RW = [
 # bank. This is what keeps the scraper finding genuinely new questions.
 CRACKSAT_SAT_MATH = [
     f"https://www.cracksat.net/sat/math-multiple-choice/test-{i}.html"
-    for i in range(1, 71)
+    for i in range(1, 121)   # verified live to test-110 — was 1-70
 ]
 CRACKSAT_SAT_GRID = [
     f"https://www.cracksat.net/sat/math-grid-ins/test-{i}.html"
-    for i in range(1, 31)
+    for i in range(1, 51)    # was 1-30; extra pages 404 harmlessly if past the end
 ]
 CRACKSAT_SAT_GRAMMAR = [
     f"https://www.cracksat.net/sat/grammar/test-{i}.html"
-    for i in range(1, 35)
+    for i in range(1, 71)    # was 1-34
 ]
 CRACKSAT_SAT_READING = [
     f"https://www.cracksat.net/sat/reading/test-{i}.html"
-    for i in range(1, 41)
+    for i in range(1, 81)    # verified live to test-70 — was 1-40
 ]
 
 # Topic-specific groupings (based on CrackSAT's own categorization):
@@ -156,7 +156,11 @@ def extract_image_url(element) -> str | None:
     """Extract image URL from an element if present."""
     if element is None:
         return None
-    img = element.find("img") if hasattr(element, 'find') else None
+    # A NavigableString is a str subclass whose .find() returns an int (substring
+    # index) — calling .get("src") on that int was the "'int' object has no
+    # attribute 'get'" crash that skipped whole pages. Only real Tag elements
+    # (which have find_all) should be searched for an <img>.
+    img = element.find("img") if hasattr(element, 'find_all') else None
     if img and img.get("src"):
         src = img["src"]
         if src.startswith("//"):
@@ -393,25 +397,53 @@ def entity_swap(groq_client, raw_text: str, target_domain: str):
         f'\nIMPORTANT: This question should be categorized under the "{target_domain}" domain.'
         if target_domain else ""
     )
-    try:
-        completion = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "system", "content": DE_COPYRIGHT_PROMPT},
-                {"role": "user", "content": f"Raw source material:{domain_hint}\n\n{raw_text}"},
-            ],
-            temperature=0.5,
-            response_format={"type": "json_object"},
-        )
-    except Exception as e:
-        return None, f"groq_error: {e}"
-    content = completion.choices[0].message.content if completion.choices else None
-    if not content:
-        return None, "Empty Groq response"
-    try:
-        return json.loads(content), None
-    except Exception:
-        return None, "JSON parse error"
+    # Raw HTTP (no groq SDK) — the SDK pulls an httpx version that clashes in CI
+    # and made EVERY call fail with "Connection error", skipping all questions.
+    # requests is already a dependency and Just Works. Model fallback + backoff so
+    # a per-model daily cap never skips a question.
+    headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
+    messages = [
+        {"role": "system", "content": DE_COPYRIGHT_PROMPT},
+        {"role": "user", "content": f"Raw source material:{domain_hint}\n\n{raw_text}"},
+    ]
+    models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "openai/gpt-oss-120b", "openai/gpt-oss-20b"]
+    for round_i in range(4):
+        all_limited = True
+        for model in models:
+            try:
+                r = requests.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers=headers,
+                    json={"model": model, "messages": messages, "temperature": 0.5, "response_format": {"type": "json_object"}},
+                    timeout=60,
+                )
+            except Exception as e:
+                all_limited = False
+                print(f"  [groq] {model} network error: {e}", flush=True)
+                continue
+            if r.status_code == 200:
+                try:
+                    content = r.json()["choices"][0]["message"]["content"]
+                except Exception:
+                    all_limited = False
+                    continue
+                if not content:
+                    all_limited = False
+                    continue
+                try:
+                    return json.loads(content), None
+                except Exception:
+                    return None, "JSON parse error"
+            if r.status_code in (429, 503):
+                continue  # this model is capped — try the next one
+            return None, f"groq_error: HTTP {r.status_code}: {r.text[:120]}"
+        if all_limited:
+            wait = min(20 * (2 ** round_i), 240)
+            print(f"  all Groq models rate-limited — waiting {wait}s…", flush=True)
+            time.sleep(wait)
+        else:
+            break
+    return None, "groq_error: all models rate-limited"
 
 
 def build_row(parsed: dict, raw_text: str):
@@ -501,10 +533,9 @@ def run_direct(domain: str, target: int):
     """Entity-swap + insert straight into Supabase, looping until EXACTLY `target`
     new questions are inserted (or the source pool is exhausted)."""
     from supabase import create_client
-    from groq import Groq
 
     supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
-    groq_client = Groq(api_key=GROQ_API_KEY)
+    groq_client = None  # entity_swap() uses raw HTTP now — no groq SDK (avoids the CI httpx clash)
 
     inserted = 0
     dup_skipped = 0
