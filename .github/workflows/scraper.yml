@@ -1,10 +1,14 @@
-name: SAT Question Scraper
+name: SAT + ACT Question Pipeline
 
 on:
   workflow_dispatch:
     inputs:
+      exam:
+        description: 'Exam: SAT (scrape) or ACT (AI-generate). Empty = both.'
+        required: false
+        type: string
       domain:
-        description: 'SAT domain to target (leave empty for all domains)'
+        description: 'Domain to target (empty = all domains in the exam)'
         required: false
         type: string
       count:
@@ -12,39 +16,51 @@ on:
         required: false
         default: '25'
         type: string
-
-  # Scheduled top-up — 6 AM and 6 PM UTC, all 8 domains each run
   schedule:
     - cron: '0 6 * * *'
     - cron: '0 18 * * *'
 
 jobs:
-  scrape-and-ingest:
+  pipeline:
     runs-on: ubuntu-latest
     timeout-minutes: 50
     strategy:
-      matrix:
-        domain:
-          - Algebra
-          - Advanced Math
-          - Problem-solving and Data Analysis
-          - Geometry and Trigonometry
-          - Information and Ideas
-          - Craft and Structure
-          - Expression of Ideas
-          - Standard English Conventions
       max-parallel: 2
       fail-fast: false
+      matrix:
+        include:
+          - { exam: "SAT", domain: "Algebra" }
+          - { exam: "SAT", domain: "Advanced Math" }
+          - { exam: "SAT", domain: "Problem-solving and Data Analysis" }
+          - { exam: "SAT", domain: "Geometry and Trigonometry" }
+          - { exam: "SAT", domain: "Information and Ideas" }
+          - { exam: "SAT", domain: "Craft and Structure" }
+          - { exam: "SAT", domain: "Expression of Ideas" }
+          - { exam: "SAT", domain: "Standard English Conventions" }
+          - { exam: "ACT", domain: "Conventions of Standard English" }
+          - { exam: "ACT", domain: "Production of Writing" }
+          - { exam: "ACT", domain: "Knowledge of Language" }
+          - { exam: "ACT", domain: "Pre-Algebra / Elementary Algebra" }
+          - { exam: "ACT", domain: "Intermediate Algebra / Coordinate Geometry" }
+          - { exam: "ACT", domain: "Plane Geometry / Trigonometry" }
+          - { exam: "ACT", domain: "Key Ideas and Details" }
+          - { exam: "ACT", domain: "Craft and Structure" }
+          - { exam: "ACT", domain: "Integration of Knowledge and Ideas" }
+          - { exam: "ACT", domain: "Interpretation of Data" }
+          - { exam: "ACT", domain: "Scientific Investigation" }
+          - { exam: "ACT", domain: "Evaluation of Models, Inferences, and Experimental Results" }
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check if this domain should run
+      - name: Check if this entry should run
         id: should_run
         run: |
-          INPUT_DOMAIN="${{ github.event.inputs.domain }}"
-          MATRIX_DOMAIN="${{ matrix.domain }}"
-          if [ -z "$INPUT_DOMAIN" ] || [ "$INPUT_DOMAIN" = "$MATRIX_DOMAIN" ]; then
+          IE="${{ github.event.inputs.exam }}"
+          ID="${{ github.event.inputs.domain }}"
+          ME="${{ matrix.exam }}"
+          MD="${{ matrix.domain }}"
+          if { [ -z "$IE" ] || [ "$IE" = "$ME" ]; } && { [ -z "$ID" ] || [ "$ID" = "$MD" ]; }; then
             echo "run=true" >> $GITHUB_OUTPUT
           else
             echo "run=false" >> $GITHUB_OUTPUT
@@ -60,12 +76,13 @@ jobs:
         if: steps.should_run.outputs.run == 'true'
         run: pip install supabase groq requests beautifulsoup4
 
-      - name: Scrape + entity-swap + insert for ${{ matrix.domain }}
+      - name: Run ${{ matrix.exam }} pipeline for ${{ matrix.domain }}
         if: steps.should_run.outputs.run == 'true'
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          TARGET_EXAM: ${{ matrix.exam }}
           TARGET_DOMAIN: ${{ matrix.domain }}
           TARGET_COUNT: ${{ github.event.inputs.count || '25' }}
         run: python scripts/scraper.py

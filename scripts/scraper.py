@@ -28,6 +28,7 @@ WEBHOOK_URL    = os.environ.get("WEBHOOK_URL", "https://www.prepvora.com/api/adm
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
 TARGET_DOMAIN  = os.environ.get("TARGET_DOMAIN", "Algebra")
 TARGET_COUNT   = int(os.environ.get("TARGET_COUNT", "25"))
+TARGET_EXAM    = os.environ.get("TARGET_EXAM", "SAT").upper()   # SAT (scrape CrackSAT) | ACT (AI-generate)
 
 # ── Direct-insert credentials (preferred) ────────────────────────────────────
 # When Supabase + Groq creds are present, the scraper entity-swaps and inserts
@@ -619,14 +620,183 @@ def run_webhook(domain: str, target: int):
     return inserted
 
 
+# ═════════════════════════════════════════════════════════════════════════════
+# ACT — AI generation. There is no working ACT scrape source (crackact.com is a
+# dead/parked domain; cracksat.net is SAT-only), so ACT questions are GENERATED.
+# Same robust architecture as SAT: generate → validate → dedup → direct insert,
+# rate-limit resilient (4-model fallback). exam_type='ACT'.
+# ═════════════════════════════════════════════════════════════════════════════
+ACT_DOMAINS = {
+    "Conventions of Standard English": "English",
+    "Production of Writing": "English",
+    "Knowledge of Language": "English",
+    "Pre-Algebra / Elementary Algebra": "Math",
+    "Intermediate Algebra / Coordinate Geometry": "Math",
+    "Plane Geometry / Trigonometry": "Math",
+    "Key Ideas and Details": "Reading",
+    "Craft and Structure": "Reading",
+    "Integration of Knowledge and Ideas": "Reading",
+    "Interpretation of Data": "Science",
+    "Scientific Investigation": "Science",
+    "Evaluation of Models, Inferences, and Experimental Results": "Science",
+}
+# Topic seeds give the generator variety across runs (the ACT "sources").
+ACT_TOPIC_SEEDS = {
+    "English": ["commas & punctuation", "subject-verb agreement", "pronoun clarity & case", "fragments & run-ons", "modifier placement", "transitions & logical flow", "concision & redundancy", "verb tense consistency", "idioms & word choice", "parallel structure"],
+    "Math": ["linear equations", "ratios & proportions", "percent problems", "exponents & radicals", "quadratics & factoring", "systems of equations", "coordinate geometry & slope", "triangles & the Pythagorean theorem", "circles & area", "right-triangle trigonometry", "probability & counting", "statistics: mean/median/mode", "sequences & patterns", "functions & evaluation", "absolute value & inequalities"],
+    "Reading": ["central idea & main purpose", "inference from a specific detail", "author's tone & perspective", "vocabulary in context", "function of a sentence or paragraph", "comparing two viewpoints", "cause & effect relationships", "locating supporting evidence"],
+    "Science": ["reading a data table", "interpreting a line or bar graph", "experimental design & controls", "two conflicting hypotheses", "trends & extrapolation", "identifying variables", "combining two figures", "evaluating a conclusion"],
+}
+
+def _act_groq_json(system_prompt: str, user_prompt: str):
+    """Raw-HTTP Groq call with 4-model fallback + backoff. Returns (dict|None, err)."""
+    headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
+    messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
+    models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "openai/gpt-oss-120b", "openai/gpt-oss-20b"]
+    for round_i in range(4):
+        all_limited = True
+        for model in models:
+            try:
+                r = requests.post(
+                    "https://api.groq.com/openai/v1/chat/completions", headers=headers,
+                    json={"model": model, "messages": messages, "temperature": 0.85, "response_format": {"type": "json_object"}},
+                    timeout=60,
+                )
+            except Exception as e:
+                all_limited = False
+                print(f"  [groq] {model} network error: {e}", flush=True)
+                continue
+            if r.status_code == 200:
+                try:
+                    return json.loads(r.json()["choices"][0]["message"]["content"]), None
+                except Exception:
+                    all_limited = False
+                    return None, "JSON parse error"
+            if r.status_code in (429, 503):
+                continue
+            return None, f"groq_error: HTTP {r.status_code}"
+        if all_limited:
+            wait = min(20 * (2 ** round_i), 240)
+            print(f"  all Groq models rate-limited — waiting {wait}s…", flush=True)
+            time.sleep(wait)
+        else:
+            break
+    return None, "groq_error: all models rate-limited"
+
+def build_act_row(parsed: dict, domain: str, section: str, nopt: int):
+    """Validate a generated ACT question into a schema-correct row. (row, err)."""
+    q_text = (parsed.get("question_text") or "").strip()
+    if not q_text or len(q_text) < 20:
+        return None, "Question text too short"
+    difficulty = parsed.get("difficulty") if parsed.get("difficulty") in VALID_DIFFICULTIES else "Medium"
+    options = parsed.get("options")
+    if not isinstance(options, list) or len(options) != nopt:
+        return None, f"Options not {nopt}-element array"
+    options = [re.sub(r"^[a-kA-K][\)\.\-]\s*", "", str(o)).strip() for o in options]
+    if any(not o for o in options):
+        return None, "Blank option"
+    if len({o.lower() for o in options}) != nopt:
+        return None, "Duplicate options"
+    raw_correct = (parsed.get("correct_answer") or "").strip()
+    correct = next((o for o in options if o == raw_correct), None)
+    if correct is None:
+        correct = next((o for o in options if o.lower() == raw_correct.lower()), None)
+    if correct is None:
+        correct = re.sub(r"^[a-kA-K][\)\.\-]\s*", "", raw_correct).strip()
+    if correct not in options:
+        return None, "correct_answer not in options"
+    rationale = (parsed.get("rationale") or "").strip() or f"The correct answer is: {correct}"
+    return {
+        "exam_type": "ACT",
+        "section": section,
+        "domain": domain,
+        "difficulty": difficulty,
+        "question_text": q_text,
+        "options": options,
+        "correct_answer": correct,
+        "rationale": rationale,
+        "is_spr": False,
+        "source_method": "Automated_Pipeline",
+    }, None
+
+def generate_act_question(domain: str, section: str, nopt: int, seed: str, diff: str):
+    passage = ""
+    if section in ("Reading", "Science"):
+        passage = ("Begin with a SHORT, self-contained passage or small described data set "
+                   "(3-6 sentences, or a tiny table described in words) the question is based on, then ask the question. ")
+    letters = "A, B, C, D, E" if nopt == 5 else "A, B, C, D"
+    system = ("You are a veteran ACT test author. Write ONE original, exam-accurate ACT practice question "
+              "entirely in your OWN words — never reproduce copyrighted text. Match the real ACT's format, "
+              "style, and difficulty.")
+    user = (f'Section: ACT {section}. Domain: "{domain}". Topic focus: {seed}. Difficulty: {diff}.\n'
+            f'{passage}'
+            f'Provide EXACTLY {nopt} answer options ({letters}). The "correct_answer" MUST be the exact text of '
+            f'one option. Use $...$ LaTeX for any math. Do NOT put letter prefixes (like "A." or "B)") inside the option text.\n'
+            f'Return ONLY JSON: {{"question_text":"...","options":[{nopt} option strings],'
+            f'"correct_answer":"exact text of the correct option","rationale":"1-3 sentence explanation",'
+            f'"difficulty":"{diff}"}}')
+    return _act_groq_json(system, user)
+
+def run_act_direct(domain: str, target: int):
+    """Generate ACT questions for `domain` and insert directly until `target` new
+    unique questions land (or the attempt budget is exhausted)."""
+    from supabase import create_client
+    supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+    section = ACT_DOMAINS[domain]
+    nopt = 4  # match the existing ACT data + the 4-option quality-scan / practice-UI expectation
+    seeds = ACT_TOPIC_SEEDS[section]
+    inserted = dup_skipped = rejected = 0
+    attempts = 0
+    budget = target * 8 + 20
+    while inserted < target and attempts < budget:
+        attempts += 1
+        seed = seeds[attempts % len(seeds)]
+        diff = ("Easy", "Medium", "Hard")[attempts % 3]
+        parsed, err = generate_act_question(domain, section, nopt, seed, diff)
+        if err:
+            rejected += 1
+            print(f"    [skip] {err}")
+            time.sleep(6 if err.startswith("groq_error") else 0.4)
+            continue
+        row, verr = build_act_row(parsed, domain, section, nopt)
+        if verr:
+            rejected += 1
+            print(f"    [skip] {verr}")
+            continue
+        if text_already_seen(supabase, row["question_text"]):
+            dup_skipped += 1
+            continue
+        try:
+            supabase.table("sat_question_bank").insert(row).execute()
+        except Exception as e:
+            rejected += 1
+            print(f"    [skip] DB error: {e}")
+            continue
+        inserted += 1
+        print(f"    [insert {inserted}/{target}] ACT · {section} · {domain} · {diff}")
+        time.sleep(0.5)
+    print(f"\n  [act-gen] inserted={inserted} dup_skipped={dup_skipped} rejected={rejected}")
+    return inserted
+
+
 def main():
-    print("=== SAT Scraper v4 (CrackSAT + Entity Swap) ===")
+    # Use the explicit exam flag — NOT the domain name — because some domains
+    # (e.g. "Craft and Structure") exist under both SAT and ACT.
+    is_act = (TARGET_EXAM == "ACT")
+    print(f"=== {'ACT Generator (AI)' if is_act else 'SAT Scraper v4 (CrackSAT + Entity Swap)'} ===")
     print(f"  Domain: {TARGET_DOMAIN}")
     print(f"  Target: {TARGET_COUNT} new questions (exact)")
-    print(f"  Mode:   {'DIRECT Supabase insert' if DIRECT_MODE else 'Webhook'}")
-    print()
-
-    inserted = run_direct(TARGET_DOMAIN, TARGET_COUNT) if DIRECT_MODE else run_webhook(TARGET_DOMAIN, TARGET_COUNT)
+    if is_act:
+        if not DIRECT_MODE:
+            print("  [error] ACT generation needs Supabase + Groq creds (DIRECT mode). Aborting.")
+            return
+        print("  Mode:   ACT AI-generation → direct Supabase insert")
+        print()
+        inserted = run_act_direct(TARGET_DOMAIN, TARGET_COUNT)
+    else:
+        print(f"  Mode:   {'DIRECT Supabase insert' if DIRECT_MODE else 'Webhook'}")
+        print()
+        inserted = run_direct(TARGET_DOMAIN, TARGET_COUNT) if DIRECT_MODE else run_webhook(TARGET_DOMAIN, TARGET_COUNT)
 
     print("\n=== Complete ===")
     print(f"  Target:   {TARGET_COUNT}")
